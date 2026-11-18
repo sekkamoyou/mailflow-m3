@@ -63,10 +63,11 @@ const AdminPanel = (await import('./AdminPanel.jsx')).default;
 test('About is available to regular users and separates versions from short build hashes', async () => {
   const originalFetch = globalThis.fetch;
   const frontendSha = '123456789abcdef0123456789abcdef012345678';
+  let backendVersion = '4.4.0';
   let backendSha = 'abcdef1234567890abcdef1234567890abcdef12';
   globalThis.__VITE_ENV__.VITE_BUILD_SHA = frontendSha;
   globalThis.fetch = async (url, options) => url === '/api/version'
-    ? { ok: true, json: async () => ({ version: '4.4.0', sha: backendSha }) }
+    ? { ok: true, json: async () => ({ version: backendVersion, sha: backendSha }) }
     : originalFetch(url, options);
   useStore.setState({ user: { id: 'u1', isAdmin: false }, accounts: [], adminTab: 'accounts' });
   const root = createRoot(document.getElementById('root'));
@@ -79,14 +80,22 @@ test('About is available to regular users and separates versions from short buil
     const frontendVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
     assert.equal(rowValue('admin.about.frontendVersion'), frontendVersion);
     assert.equal(rowValue('admin.about.frontendBuild'), '1234567');
-    assert.equal(rowValue('admin.about.version'), '4.4.0');
+    assert.equal(rowValue('admin.about.version'), 'v4.4.0-m3');
     assert.equal(rowValue('admin.about.backendBuild'), 'abcdef1');
-    assert.ok(document.querySelector('a[href="https://github.com/sekkamoyou/mailflow-m3/tree/mailflow-m3/frontend-material"]'));
-    assert.ok(document.querySelector('a[href="https://github.com/sekkamoyou/mailflow-m3/tree/mailflow-m3/backend"]'));
-    assert.ok(document.querySelector('a[href="/licenses/AGPL-3.0.txt"]'));
+    const label = key => [...document.querySelectorAll('span')].find(span => span.textContent === key);
+    const sourceLinks = [...label('admin.about.sourceCode').parentElement.querySelectorAll('a')];
+    assert.deepEqual(sourceLinks.map(link => link.getAttribute('href')), [
+      'https://github.com/sekkamoyou/mailflow-m3/tree/mailflow-m3/frontend-material',
+      'https://github.com/sekkamoyou/mailflow-m3/tree/mailflow-m3/backend',
+    ]);
+    const licenseLink = label('admin.about.license').nextElementSibling.querySelector('a');
+    assert.equal(licenseLink?.getAttribute('href'), '/licenses/AGPL-3.0.txt');
+    assert.equal(licenseLink?.textContent, 'AGPL-3.0');
     await React.act(async () => useStore.setState({ adminTab: 'accounts' }));
+    backendVersion = '4.5.2';
     backendSha = 'dev';
     await React.act(async () => useStore.setState({ adminTab: 'about' }));
+    assert.equal(rowValue('admin.about.version'), 'v4.5.2-m3');
     assert.equal(rowValue('admin.about.backendBuild'), '—');
   } finally {
     await React.act(async () => root.unmount());

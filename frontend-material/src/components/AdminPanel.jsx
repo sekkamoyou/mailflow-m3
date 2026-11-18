@@ -5512,6 +5512,11 @@ function shortBuild(sha) {
   return typeof sha === 'string' && /^[a-f0-9]{7,64}$/i.test(sha) ? sha.slice(0, 7) : '—';
 }
 
+function backendVersionLabel(version) {
+  if (typeof version !== 'string' || !/^\d/.test(version)) return '—';
+  return `v${version.replace(/-m3$/, '')}-m3`;
+}
+
 function AboutTab() {
   const { t } = useTranslation();
   const [info, setInfo] = useState(null);
@@ -5527,9 +5532,11 @@ function AboutTab() {
   const infoRows = [
     [t('admin.about.frontendVersion'), frontendPackage.version],
     [t('admin.about.frontendBuild'),  shortBuild(import.meta.env.VITE_BUILD_SHA)],
-    [t('admin.about.version'),        info ? info.version : '…'],
+    [t('admin.about.version'),        info ? backendVersionLabel(info.version) : '…'],
     [t('admin.about.backendBuild'),   info ? shortBuild(info.sha) : '…'],
-    [t('admin.about.license'),        'AGPL-3.0'],
+    [t('admin.about.license'), (
+      <a href="/licenses/AGPL-3.0.txt" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>AGPL-3.0</a>
+    )],
   ];
   const generalRows = [
     [t('admin.about.website'),    'https://mailflow.sh'],
