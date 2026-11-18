@@ -1,0 +1,412 @@
+// Render test for the sidebar's folder unread badges (#536).
+//
+// A collapsed folder showed only its own count, so new mail in its subfolders was invisible
+// until it was expanded. The harness mirrors MessageList.render.test.js: node --test cannot
+// parse JSX, so the loader hook transforms .jsx with sucrase, and react-i18next is stubbed.
+
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { registerHooks } from 'node:module';
+import { JSDOM } from 'jsdom';
+import { transform } from 'sucrase';
+
+registerHooks({
+  load(url, context, nextLoad) {
+    if (url.endsWith('react-i18next/dist/es/index.js') || url.endsWith('/react-i18next')) {
+      return { format: 'module', shortCircuit: true, source: [
+        'export const useTranslation = () => ({ t: (k, d) => (typeof d === "string" ? d : d?.defaultValue ?? k), i18n: { language: "en", changeLanguage: () => {} } });',
+        'export const initReactI18next = { type: "3rdParty", init: () => {} };',
+        'export const Trans = ({ children }) => children ?? null;',
+        'export const I18nextProvider = ({ children }) => children ?? null;',
+        'export default { useTranslation, initReactI18next };',
+      ].join('\n') };
+    }
+    if (url.endsWith('.json')) {
+      return { format: 'module', shortCircuit: true, source: `export default ${readFileSync(new URL(url), 'utf8')}` };
+    }
+    const shimViteEnv = (code) => code.replaceAll('import.meta.env', 'globalThis.__VITE_ENV__');
+    if (url.endsWith('.jsx')) {
+      const code = readFileSync(new URL(url), 'utf8');
+      const out = transform(code, { transforms: ['jsx'], jsxRuntime: 'automatic', filePath: url });
+      return { format: 'module', shortCircuit: true, source: shimViteEnv(out.code) };
+    }
+    if (url.startsWith('file:') && url.endsWith('.js')) {
+      const code = readFileSync(new URL(url), 'utf8');
+      if (code.includes('import.meta.env')) {
+        return { format: 'module', shortCircuit: true, source: shimViteEnv(code) };
+      }
+    }
+    return nextLoad(url, context);
+  },
+});
+
+const dom = new JSDOM('<div id="root"></div>', { url: 'https://mail.example.invalid', pretendToBeVisual: true });
+Object.assign(globalThis, {
+  window: dom.window, document: dom.window.document,
+  localStorage: dom.window.localStorage, CustomEvent: dom.window.CustomEvent,
+  Node: dom.window.Node, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement,
+  getComputedStyle: dom.window.getComputedStyle,
+  ResizeObserver: class { observe() {} unobserve() {} disconnect() {} },
+  IS_REACT_ACT_ENVIRONMENT: true,
+});
+dom.window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} });
+dom.window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+globalThis.matchMedia = dom.window.matchMedia;
+dom.window.Element.prototype.scrollIntoView = () => {};
+globalThis.__VITE_ENV__ = { MODE: 'test', DEV: false, PROD: true };
+globalThis.fetch = async () => ({ ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => ({}), text: async () => '{}' });
+
+const React = await import('react');
+const { createRoot } = await import('react-dom/client');
+const { useStore } = await import('../store/index.js');
+const Sidebar = (await import('./Sidebar.jsx')).default;
+
+const ACCOUNT = { id: 'acct-1', email_address: 'a@example.com', name: 'A', color: '#6366f1', enabled: true, include_in_unified_inbox: true };
+// The issue's example: Investments holds no mail itself, its subfolders hold three unread.
+const FOLDERS = [
+  { path: 'INBOX', name: 'INBOX', unread_count: 0 },
+  { path: 'Investments', name: 'Investments', no_select: true },
+  { path: 'Investments/SubfolderA', name: 'SubfolderA', unread_count: 1 },
+  { path: 'Investments/SubfolderB', name: 'SubfolderB', unread_count: 0 },
+  { path: 'Investments/SubfolderC', name: 'SubfolderC', unread_count: 2 },
+  { path: 'Banking', name: 'Banking', unread_count: 1 },
+  { path: 'Banking/Cards', name: 'Cards', unread_count: 4 },
+  { path: 'Banking/Muted', name: 'Muted', unread_count: 7 },
+];
+
+let root;
+async function mount({ collapsed = [], hidden = [], state = {} }) {
+  if (root) await React.act(async () => root.unmount());
+  useStore.setState({
+    accounts: [ACCOUNT], accountsReady: true,
+    folders: { 'acct-1': FOLDERS },
+    selectedAccountId: 'acct-1', selectedFolder: 'INBOX',
+    expandedAccounts: { 'acct-1': true },
+    collapsedFolders: collapsed.map(p => `acct-1:${p}`),
+    hiddenFolders: hidden.length ? { 'acct-1': hidden } : {},
+    scheduledCount: 0, scheduledAttention: 0,
+    ...state,
+  });
+  await React.act(async () => {
+    root = createRoot(dom.window.document.getElementById('root'));
+    root.render(React.createElement(Sidebar));
+  });
+}
+
+// The badge text on a folder's row, found by the row's label; null when the row has no badge.
+function badgeOf(name) {
+  const label = [...dom.window.document.querySelectorAll('span')].find(s => s.textContent === name);
+  assert.ok(label, `expected a row for ${name}`);
+  const badge = label.nextElementSibling;
+  return badge && badge.tagName === 'SPAN' ? badge.textContent : null;
+}
+
+test('the account menu keeps source links in the About screen', async () => {
+  await mount({ state: { user: { id: 1, username: 'reader', isAdmin: false } } });
+  const trigger = [...document.querySelectorAll('button[aria-haspopup="dialog"]')]
+    .find(button => button.textContent.includes('reader'));
+  assert.ok(trigger);
+  await React.act(async () => trigger.click());
+  const menu = document.querySelector('[role="dialog"][aria-label="sidebar.settings"]');
+  assert.ok(menu);
+  assert.ok(menu.textContent.includes('sidebar.settings'));
+  assert.ok(!menu.textContent.includes('admin.about.sourceCode'));
+  assert.equal(menu.querySelector('a[href="/licenses/AGPL-3.0.txt"]'), null);
+  await React.act(async () => useStore.setState({ user: null }));
+});
+
+describe('Sidebar — collapsed folders show their subfolders\' unread mail (#536)', () => {
+  test('a collapsed container folder shows the total of its subfolders', async () => {
+    await mount({ collapsed: ['Investments'] });
+    assert.equal(badgeOf('Investments'), '3');
+  });
+
+  test('expanded, the parent shows only its own count and each subfolder its own', async () => {
+    await mount({ collapsed: [] });
+    assert.equal(badgeOf('Investments'), null);
+    assert.equal(badgeOf('SubfolderA'), '1');
+    assert.equal(badgeOf('SubfolderC'), '2');
+    assert.equal(badgeOf('Banking'), '1');
+  });
+
+  test('a collapsed folder with mail of its own adds it, and hidden subfolders stay out', async () => {
+    await mount({ collapsed: ['Banking'], hidden: ['Banking/Muted'] });
+    assert.equal(badgeOf('Banking'), '5');
+  });
+});
+
+// The Scheduled entry (#543, design 5.2): shown while anything is scheduled or needs attention, and
+// while the view is open; the badge is the pending count, a red dot says some need attention.
+describe('Sidebar: the Scheduled entry', () => {
+  const entry = () => [...dom.window.document.querySelectorAll('[data-mailbox-row]')]
+    .find(el => el.textContent.startsWith('sidebar.scheduled'));
+
+  test('hidden with nothing scheduled', async () => {
+    await mount({});
+    assert.equal(entry(), undefined);
+  });
+
+  test('shown with its pending count, and it opens the view with no account selected', async () => {
+    await mount({ state: { scheduledCount: 3 } });
+    assert.ok(entry());
+    assert.equal(entry().textContent, 'sidebar.scheduled3');
+    assert.ok((entry().querySelector('[data-nav-alert]')) === (null), "DOM identity: entry().querySelector('[data-nav-alert]') === null");
+    await React.act(async () => { entry().click(); });
+    assert.equal(useStore.getState().selectedAccountId, null);
+    assert.equal(useStore.getState().selectedFolder, '__scheduled__');
+  });
+
+  test('a red dot and its name say that some need attention', async () => {
+    await mount({ state: { scheduledCount: 0, scheduledAttention: 2 } });
+    assert.ok(entry().querySelector('[data-nav-alert]'));
+    assert.equal(entry().getAttribute('aria-label'), 'sidebar.scheduled, sidebar.scheduledAttention');
+  });
+
+  test('its name carries the pending count the badge shows, and the attention count', async () => {
+    await mount({ state: { scheduledCount: 1, scheduledAttention: 3 } });
+    assert.equal(entry().getAttribute('aria-label'), 'sidebar.scheduled, sidebar.scheduledPending, sidebar.scheduledAttention');
+    await mount({ state: { scheduledCount: 1, scheduledAttention: 0 } });
+    assert.equal(entry().getAttribute('aria-label'), 'sidebar.scheduled, sidebar.scheduledPending');
+  });
+
+  test('stays while the view is open, and is the active row, not All Inboxes', async () => {
+    await mount({ state: { selectedAccountId: null, selectedFolder: '__scheduled__' } });
+    assert.ok(entry());
+    assert.ok(entry().className.includes('nav-item-active'));
+  });
+});
+
+// #694: hiding a folder and then deleting it at the provider left the "hidden folders" toggle in
+// the sidebar for good, and clicking it revealed nothing. The toggle counts only hidden folders
+// that still exist.
+describe('Sidebar: the hidden folders toggle (#694)', () => {
+  const toggle = () => [...dom.window.document.querySelectorAll('button')]
+    .find(b => b.textContent === 'sidebar.hiddenFolders' || b.textContent === 'sidebar.hideHidden');
+  const row = name => [...dom.window.document.querySelectorAll('span')].find(s => s.textContent === name);
+
+  test('no toggle when the only hidden folder is gone from the account', async () => {
+    await mount({ hidden: ['Deleted at provider'] });
+    assert.equal(Boolean(toggle()), false, 'no hidden-folders toggle');
+  });
+
+  test('with one hidden folder gone and one still there, the toggle reveals the one that exists', async () => {
+    await mount({ hidden: ['Deleted at provider', 'Banking'] });
+    assert.equal(Boolean(toggle()), true, 'hidden-folders toggle shown');
+    assert.equal(Boolean(row('Banking')), false, 'Banking row is hidden');
+    await React.act(async () => { toggle().click(); });
+    assert.equal(Boolean(row('Banking')), true, 'Banking row revealed');
+    assert.equal(toggle().textContent, 'sidebar.hideHidden');
+  });
+
+  test('a folder back at its hidden path is hidden again, with the toggle', async () => {
+    await mount({ hidden: ['Banking'] });
+    assert.equal(Boolean(toggle()), true, 'hidden-folders toggle shown');
+    assert.equal(Boolean(row('Banking')), false, 'Banking row is hidden');
+  });
+
+  test('the stale path is kept in the preferences, not wiped by rendering', async () => {
+    await mount({ hidden: ['Deleted at provider', 'Banking'] });
+    assert.deepEqual(useStore.getState().hiddenFolders['acct-1'], ['Deleted at provider', 'Banking']);
+  });
+});
+
+test('the account menu is a native keyboard trigger and mixed settings actions are not orphaned menuitems', async () => {
+  await mount({ state: { user: { id: 'u1', username: 'qa@example.invalid' } } });
+  const trigger = document.querySelector('button[aria-haspopup="dialog"][aria-expanded]');
+  assert.ok(trigger);
+  trigger.focus();
+  await React.act(async () => trigger.click());
+  const dialog = document.querySelector('[role="dialog"][aria-modal="true"]');
+  assert.ok(dialog);
+  assert.ok(!dialog.querySelector('[role="menuitem"]'));
+  assert.ok(dialog.contains(document.activeElement));
+  await React.act(async () => document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  assert.ok(!document.querySelector('[role="dialog"]'));
+  assert.ok(document.activeElement === trigger);
+  await React.act(async () => root.unmount()); root = null;
+});
+
+test('repeated menu resize callbacks correct the rendered position without accumulating the offset', async () => {
+  const originalRect = window.HTMLElement.prototype.getBoundingClientRect;
+  const originalObserver = globalThis.ResizeObserver;
+  const originalWidth = window.innerWidth, originalHeight = window.innerHeight;
+  const callbacks = [];
+  let offsetX = -12, offsetY = -8;
+  window.innerWidth = 320; window.innerHeight = 568;
+  globalThis.ResizeObserver = class {
+    constructor(callback) { callbacks.push(callback); }
+    observe() {} disconnect() {}
+  };
+  window.HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this.getAttribute('role') !== 'menu') return originalRect.call(this);
+    const left = parseFloat(this.style.left || 0) + offsetX;
+    const top = parseFloat(this.style.top || 0) + offsetY;
+    return { left, top, x: left, y: top, width: 210, height: 300, right: left + 210, bottom: top + 300 };
+  };
+  try {
+    await mount({ state: { sidebarCollapsed: false } });
+    const header = [...document.querySelectorAll('[data-mailbox-row]')].find(e => e.textContent.includes(ACCOUNT.email_address));
+    assert.ok(header);
+    await React.act(async () => header.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 548 })));
+    const menu = document.querySelector('[role=menu]');
+    assert.ok(menu);
+    assert.ok(callbacks.length > 0);
+    offsetX = -24; offsetY = -16;
+    await React.act(async () => { callbacks.at(-1)(); callbacks.at(-1)(); });
+    const rect = menu.getBoundingClientRect();
+    assert.equal(rect.left, 98);
+    assert.equal(rect.top, 256);
+  } finally {
+    if (root) { await React.act(async () => root.unmount()); root = null; }
+    window.HTMLElement.prototype.getBoundingClientRect = originalRect;
+    globalThis.ResizeObserver = originalObserver;
+    window.innerWidth = originalWidth; window.innerHeight = originalHeight;
+  }
+});
+
+test('parent and leaf folders keep a shared disclosure column and toggles expose their state', async () => {
+  await mount({});
+  const rows = [...document.querySelectorAll('.md-folder-row')];
+  assert.ok(rows.some(r => r.querySelector('.md-folder-toggle')));
+  assert.ok(rows.some(r => r.querySelector('.md-folder-toggle-space')));
+  const parent = rows.find(r => r.querySelector('.md-folder-toggle'));
+  const toggle = parent.querySelector('.md-folder-toggle');
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  await React.act(async () => toggle.click());
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  assert.ok(rows.some(r => Number(r.dataset.folderDepth) > 0));
+});
+
+test('mobile drawer exposes Contacts independently and closes without resetting the mailbox', async () => {
+  const width = window.innerWidth;
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 416 });
+  try {
+    await mount({ state: { showContacts: false, showAdmin: true, selectedMessageId: 'kept-message' } });
+    await React.act(async () => useStore.setState({ mobileSidebarOpen: true }));
+    const entry = [...document.querySelectorAll('[data-mailbox-sidebar] [role=button]')].find(e => e.textContent.trim() === 'contacts.title');
+    assert.ok(entry, 'Contacts is a root drawer entry');
+    await React.act(async () => entry.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    assert.equal(useStore.getState().showContacts, true);
+    assert.equal(useStore.getState().showAdmin, false);
+    assert.equal(useStore.getState().mobileSidebarOpen, false);
+    assert.equal(useStore.getState().selectedMessageId, 'kept-message');
+    assert.equal(entry.classList.contains('nav-item-active'), true);
+    await React.act(async () => useStore.getState().setShowContacts(false));
+    assert.equal(useStore.getState().selectedMessageId, 'kept-message');
+    await React.act(async () => root.unmount()); root = null;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+    await mount({ state: { showContacts: false } });
+    assert.equal([...document.querySelectorAll('[data-mailbox-sidebar] [role=button]')].some(e => e.textContent.trim() === 'contacts.title'), false);
+  } finally {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    if (root) { await React.act(async () => root.unmount()); root = null; }
+  }
+});
+
+// #695: every account started at sort_order 0, and Move up / Move down saved only the two accounts
+// it swapped, so with three or more the others reshuffled on the next load. The move now saves the
+// whole order.
+describe('Sidebar: moving an account saves the whole order', () => {
+  const accounts = ['A', 'B', 'C', 'D'].map(name => ({ ...ACCOUNT, id: `acct-${name}`, name, email_address: `${name.toLowerCase()}@example.com` }));
+
+  test('Move up sends every account, in the new order', async () => {
+    const calls = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init = {}) => {
+      calls.push({ url: String(url), method: init.method, body: init.body ? JSON.parse(init.body) : null });
+      return realFetch(url, init);
+    };
+    try {
+      await mount({ state: { accounts, folders: {}, expandedAccounts: {} } });
+      const row = [...dom.window.document.querySelectorAll('*')].find(el => el.textContent === 'B' && !el.children.length);
+      assert.ok(row, 'expected the row of account B');
+      await React.act(async () => {
+        row.dispatchEvent(new dom.window.MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 }));
+      });
+      const moveUp = [...dom.window.document.querySelectorAll('button')].find(el => el.textContent === 'sidebar.accountMenu.moveUp');
+      assert.ok(moveUp, 'expected Move up in the account menu');
+      await React.act(async () => { moveUp.click(); });
+      const saved = calls.filter(c => c.url.includes('/accounts/'));
+      assert.deepEqual(saved.map(c => [c.method, c.url.replace(/^.*\/api/, '/api')]), [['PATCH', '/api/accounts/order']]);
+      assert.deepEqual(saved[0].body, { ids: ['acct-B', 'acct-A', 'acct-C', 'acct-D'] });
+      assert.deepEqual(useStore.getState().accounts.map(a => a.name), ['B', 'A', 'C', 'D']);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
+
+// #643: Drafts shows how many drafts it holds (MailFlow saves them read, so an unread badge never
+// showed), outlined so it doesn't read as unread mail. Other folders keep their unread count.
+describe('Sidebar: the Drafts total', () => {
+  const withDrafts = (drafts) => ({ folders: { 'acct-1': [...FOLDERS, { path: 'Drafts', name: 'Drafts', special_use: '\\Drafts', ...drafts }] } });
+  const draftsBadge = () => {
+    // The row is labeled with the role name or the folder's own name, whichever the sidebar shows.
+    const label = [...dom.window.document.querySelectorAll('span')]
+      .find(s => ['folders.drafts', 'Drafts', 'Entwürfe'].includes(s.textContent));
+    assert.ok(label, 'expected the Drafts row');
+    const badge = label.nextElementSibling;
+    return badge && badge.tagName === 'SPAN' ? badge : null;
+  };
+
+  test('shows the server total, not unread, and says what it is', async () => {
+    await mount({ state: withDrafts({ total_count: 3, unread_count: 0 }) });
+    const badge = draftsBadge();
+    assert.equal(badge?.textContent, '3');
+    assert.equal(badge.getAttribute('title'), 'sidebar.draftsTotal');
+    assert.match(badge.getAttribute('style'), /border: 1px solid/);
+    assert.equal(badgeOf('Banking'), '1', 'other folders still show unread');
+  });
+
+  test('no badge for an empty Drafts folder, or before its count is known', async () => {
+    await mount({ state: withDrafts({ total_count: 0, unread_count: 0 }) });
+    assert.equal(draftsBadge(), null);
+    await mount({ state: withDrafts({ total_count: null, unread_count: null, counts_known: false }) });
+    assert.equal(draftsBadge(), null);
+  });
+
+  test('a Drafts folder found by the account\'s mapping counts the same way', async () => {
+    await mount({ state: {
+      accounts: [{ ...ACCOUNT, folder_mappings: { drafts: 'Entwürfe' } }],
+      folders: { 'acct-1': [...FOLDERS, { path: 'Entwürfe', name: 'Entwürfe', total_count: 2, unread_count: 1 }] },
+    } });
+    assert.equal(draftsBadge()?.textContent, '2');
+  });
+});
+
+// Both ways out of the sidebar run the store's signOut, as the lock screen does, so the rule that
+// clears the lock only once the server confirmed the sign-out lives in one place.
+describe('Sidebar: Sign out', () => {
+  // The deepest element showing exactly this text.
+  const byText = (text) => [...dom.window.document.querySelectorAll('*')].filter(el => el.textContent === text).pop();
+
+  async function signOutCalls() {
+    const signOut = useStore.getState().signOut;
+    let calls = 0;
+    try {
+      await mount({ state: { user: { id: 'u1', username: 'alice' }, signOut: async () => { calls++; } } });
+      await React.act(async () => { byText('alice').click(); });
+      const item = byText('sidebar.signOut');
+      assert.ok(item, 'expected Sign out');
+      await React.act(async () => { item.click(); });
+      return calls;
+    } finally {
+      await React.act(async () => { useStore.setState({ signOut }); });
+    }
+  }
+
+  test('from the user menu', async () => {
+    assert.equal(await signOutCalls(), 1);
+  });
+
+  test('from the account section on a phone', async () => {
+    const width = dom.window.innerWidth;
+    dom.window.innerWidth = 500;
+    try {
+      assert.equal(await signOutCalls(), 1);
+    } finally {
+      dom.window.innerWidth = width;
+    }
+  });
+});

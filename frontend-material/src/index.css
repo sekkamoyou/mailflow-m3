@@ -1,0 +1,467 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  /* Motion system */
+  --motion-fast:   120ms;
+  --motion-normal: 180ms;
+  --motion-slow:   260ms;
+  --ease-standard:  cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --bg-primary: #0f0f11;
+  --bg-secondary: #161619;
+  --bg-tertiary: #1e1e23;
+  --bg-elevated: #242429;
+  --bg-hover: #2a2a30;
+  --border: #2e2e35;
+  --border-subtle: #232328;
+  --text-primary: #e8e8ed;
+  --text-secondary: #9898a8;
+  --text-tertiary: #5a5a6a;
+  --accent: #7c6af7;
+  --accent-dim: #3d3569;
+  --accent-glow: rgba(124, 106, 247, 0.15);
+  --green: #4ade80;
+  --red: #f87171;
+  --amber: #fbbf24;
+  /* Elevation system */
+  --shadow-soft: 0 2px 8px rgba(0,0,0,0.28);
+  --shadow-popover: 0 4px 20px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.05);
+  --shadow-modal: 0 8px 48px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.06), inset 0 1px 0 rgba(255,255,255,0.07);
+  --shadow-drawer: 4px 0 32px rgba(0,0,0,0.6), 1px 0 0 rgba(255,255,255,0.04);
+  --highlight-top: inset 0 1px 0 rgba(255,255,255,0.06);
+  --overlay-scrim: rgba(0,0,0,0.5);
+}
+/* iOS 27 blurs the top of a home-screen app's screen: the status bar and about 18px below it,
+   whatever the status-bar style. Top bars pad themselves by --sat, so on iOS (only its WebKit has
+   -webkit-touch-callout) it reaches 8px further below the status bar, and their icons and text
+   start at the blur's edge instead of in it; the bar's own color fills the blurred strip. They
+   take --sat-trim off their bottom padding, so they grow by 4px, not 8. min() keeps both at 0
+   where nothing is drawn under a status bar (a Safari tab, landscape on iPhone). */
+:root { --sat-trim: 0px; }
+@supports (-webkit-touch-callout: none) {
+  :root {
+    --sat: calc(env(safe-area-inset-top, 0px) + min(8px, env(safe-area-inset-top, 0px)));
+    --sat-trim: min(4px, env(safe-area-inset-top, 0px));
+  }
+}
+
+
+* {
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 100dvh tracks the visible viewport on iOS Safari (excludes address bar).
+   Fall back to -webkit-fill-available → 100% for older devices. */
+html {
+  height: -webkit-fill-available;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans, 'DM Sans', sans-serif);
+  /* Prevent wide email iframes from making the entire page scroll horizontally
+     on iOS Safari. Nested overflow:hidden on inner containers is not enough —
+     iOS WebKit can still scroll the document itself. */
+  overflow-x: hidden;
+  /* Disable the browser's native overscroll actions app-wide: Chrome Android
+     pull-to-refresh and horizontal back/forward swipe-navigation. Without this,
+     a mobile row swipe (e.g. swipe-to-archive) can be hijacked by the browser
+     and reload the page mid-gesture — which cancels the deferred archive request
+     and leaves the message unarchived. The app provides its own pull-to-refresh. */
+  overscroll-behavior: none;
+}
+
+body, #root {
+  height: 100%;
+  min-height: -webkit-fill-available;
+}
+
+/* Used by MailApp root div — dvh on modern browsers, svh as middle ground */
+:root {
+  --app-height: 100svh;
+}
+@supports (height: 100dvh) {
+  :root {
+    --app-height: 100dvh;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; transition: background 0.2s; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+
+/* Focus rings */
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Selection */
+::selection { background: var(--selection-bg, var(--accent-dim)); color: var(--text-primary); }
+
+/* Sync icon rotation */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Unread indicator pulse */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.15); }
+}
+
+.unread-dot { animation: pulse-dot 2s ease-in-out infinite; }
+
+/* Prevent iOS long-press from triggering the native "Copy | Look Up | Translate"
+   callout on sidebar interactive rows. Stylesheet rules are more reliably honoured
+   by WebKit than the equivalent inline styles. */
+.no-callout {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Notification toast */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes toast-out {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(100%); }
+}
+
+.toast-enter { animation: toast-in 0.2s ease forwards; }
+.toast-exit { animation: toast-out 0.2s ease forwards; }
+
+/* Generic fade-in */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Message pane fade when switching messages */
+@keyframes pane-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Compose modal entrance (desktop bottom-right sheet) */
+@keyframes compose-enter {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Unified centered modal panel entrance */
+@keyframes modal-enter {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Backdrop / scrim fade */
+@keyframes backdrop-enter {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes sheet-enter {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+/* Mobile toast (slides up, no sideways) */
+@keyframes toast-in-mobile {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-out-mobile {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(12px); }
+}
+.toast-enter-mobile { animation: toast-in-mobile 0.2s ease forwards; }
+.toast-exit-mobile  { animation: toast-out-mobile 0.2s ease forwards; }
+
+/* Inline action bar (undo-able actions: delete, archive, move) */
+@keyframes action-bar-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes action-bar-out {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(8px); }
+}
+@keyframes action-bar-progress {
+  from { width: 100%; }
+  to   { width: 0%; }
+}
+.action-bar-enter { animation: action-bar-in  0.2s ease forwards; }
+.action-bar-exit  { animation: action-bar-out 0.2s ease forwards; }
+
+/* Skeleton loader shimmer */
+@keyframes skeleton-shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+
+.skeleton-line {
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-tertiary) 25%,
+    var(--bg-elevated) 50%,
+    var(--bg-tertiary) 75%
+  );
+  background-size: 800px 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+/* Prevent iOS Safari from zooming in when focusing inputs smaller than 16px */
+@supports (-webkit-touch-callout: none) {
+  input, textarea, select { font-size: 16px !important; }
+}
+
+/* Button press physics — add class "btn-press" to interactive buttons */
+.btn-press {
+  transition: transform 0.08s ease, opacity 0.08s ease;
+}
+.btn-press:active {
+  transform: scale(0.95);
+  opacity: 0.85;
+}
+
+/* The phone composer's title (ComposeModal): when the header leaves it room for no more than a
+   letter and an ellipsis, it is hidden rather than cut to "N…", and stays in the accessibility
+   tree (opacity, not visibility or display). Wide layouts never get this narrow. */
+.compose-phone-title {
+  container-type: inline-size;
+}
+@container (max-width: 48px) {
+  .compose-phone-title > span { opacity: 0; }
+}
+
+/* Unified popover entrance */
+@keyframes popover-in {
+  from { opacity: 0; transform: scale(0.96) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Panel slide transitions (mobile list ↔ detail, contact detail enter) */
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Respect reduced-motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* TipTap rich-text compose editor */
+.tiptap-compose .ProseMirror {
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font-sans, 'DM Sans', sans-serif);
+  font-size: 13px;
+  line-height: 1.7;
+  min-height: 120px;
+  padding: 12px 14px;
+  box-sizing: border-box;
+}
+.tiptap-compose .ProseMirror p { margin: 0 0 0.25em; }
+.tiptap-compose .ProseMirror p:last-child { margin-bottom: 0; }
+.tiptap-compose .ProseMirror ul { padding-left: 1.4em; margin: 0.25em 0; list-style-type: disc; }
+.tiptap-compose .ProseMirror ol { padding-left: 1.4em; margin: 0.25em 0; list-style-type: decimal; }
+.tiptap-compose .ProseMirror li { display: list-item; }
+.tiptap-compose .ProseMirror blockquote {
+  border-left: 3px solid var(--border);
+  margin: 0.25em 0;
+  padding-left: 0.75em;
+  color: var(--text-secondary);
+}
+.tiptap-compose .ProseMirror a { color: var(--accent); text-decoration: underline; }
+.tiptap-compose .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--text-tertiary);
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
+/* Mobile: match textarea font-size override */
+@supports (-webkit-touch-callout: none) {
+  .tiptap-compose .ProseMirror { font-size: 16px !important; }
+}
+
+/* Inline images in compose */
+.tiptap-compose .ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  cursor: default;
+  display: inline-block;
+  vertical-align: bottom;
+}
+.tiptap-compose .ProseMirror img.ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Tables in compose */
+.tiptap-compose .ProseMirror table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  width: auto;
+  max-width: 100%;
+  overflow: hidden;
+  table-layout: fixed;
+}
+.tiptap-compose .ProseMirror th,
+.tiptap-compose .ProseMirror td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  min-width: 48px;
+  font-size: 13px;
+  vertical-align: top;
+  position: relative;
+}
+.tiptap-compose .ProseMirror th {
+  background: var(--bg-tertiary);
+  font-weight: 600;
+  text-align: left;
+}
+.tiptap-compose .ProseMirror .selectedCell::after {
+  background: var(--accent-dim);
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Rendered markdown in AI operation output cards (#215). Scoped to .ai-markdown so it
+   never affects other content. Spacing is tight to sit inside the compact result card. */
+.ai-markdown > *:first-child { margin-top: 0; }
+.ai-markdown > *:last-child { margin-bottom: 0; }
+.ai-markdown p { margin: 0 0 8px; }
+.ai-markdown h1, .ai-markdown h2, .ai-markdown h3,
+.ai-markdown h4, .ai-markdown h5, .ai-markdown h6 {
+  margin: 12px 0 6px; font-weight: 600; line-height: 1.3;
+}
+.ai-markdown h1 { font-size: 1.25em; }
+.ai-markdown h2 { font-size: 1.15em; }
+.ai-markdown h3 { font-size: 1.05em; }
+.ai-markdown h4, .ai-markdown h5, .ai-markdown h6 { font-size: 1em; }
+.ai-markdown ul, .ai-markdown ol { margin: 4px 0 8px; padding-left: 20px; }
+/* Tailwind's preflight sets list-style: none on every list; markdown lists need their markers (#557). */
+.ai-markdown ul { list-style-type: disc; }
+.ai-markdown ul ul { list-style-type: circle; }
+.ai-markdown ol { list-style-type: decimal; }
+.ai-markdown li { margin: 2px 0; }
+.ai-markdown li > ul, .ai-markdown li > ol { margin: 2px 0; }
+.ai-markdown a { color: var(--accent); text-decoration: underline; }
+.ai-markdown code {
+  background: var(--bg-tertiary); padding: 1px 4px; border-radius: 4px;
+  font-family: monospace; font-size: 0.9em;
+}
+.ai-markdown pre {
+  background: var(--bg-tertiary); padding: 8px 10px; border-radius: 6px;
+  overflow-x: auto; margin: 6px 0;
+}
+.ai-markdown pre code { background: none; padding: 0; }
+.ai-markdown blockquote {
+  border-left: 3px solid var(--border); margin: 6px 0; padding-left: 10px;
+  color: var(--text-secondary);
+}
+.ai-markdown hr { border: none; border-top: 1px solid var(--border-subtle); margin: 10px 0; }
+.ai-markdown table { border-collapse: collapse; margin: 6px 0; font-size: 0.95em; }
+.ai-markdown th, .ai-markdown td { border: 1px solid var(--border); padding: 3px 8px; }
+.ai-markdown th { background: var(--bg-tertiary); }
+
+/* Email div renderer — resets MailFlow styles from the inner email root so email
+   CSS starts from browser defaults. contain:layout style scopes position:fixed/
+   absolute descendants and CSS counters. Paint containment is intentionally
+   omitted: it clips rendering to the element's border-box, which on mobile
+   (border-box == viewport width) silently hides the right side of wide emails
+   before the scale-to-fit transform in applyScale() has a chance to shrink them.
+   The parent card div carries contain:layout as a second layer of protection. */
+[data-mailflow-email] {
+  all: revert;
+  contain: layout style;
+  overflow-x: auto;
+  max-width: 100%;
+  color-scheme: light;
+}
+
+/* PasswordInput draws its own eye button; Edge adds a native reveal button to every password
+   field, which showed two eyes side by side. */
+.mf-password-input::-ms-reveal { display: none; }
+
+/* Attachment viewer: pdf.js text layer. Transparent text laid over each rendered PDF page so it
+   can be selected, copied and found with the browser's Find. Mirrors .textLayer from pdf.js's
+   pdf_viewer.css; --total-scale-factor is set per page by utils/pdfDocument.js. */
+.mf-pdf-page { --scale-round-x: 1px; --scale-round-y: 1px; }
+.mf-pdf-page .textLayer {
+  position: absolute; inset: 0; overflow: clip; opacity: 1; z-index: 0;
+  text-align: initial; line-height: 1; letter-spacing: normal; word-spacing: normal;
+  -webkit-text-size-adjust: none; text-size-adjust: none; forced-color-adjust: none;
+  transform-origin: 0 0; caret-color: CanvasText;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.mf-pdf-page .textLayer :is(span, br) {
+  color: transparent; position: absolute; white-space: pre; cursor: text;
+  transform-origin: 0% 0%; -webkit-user-select: text; user-select: text;
+}
+.mf-pdf-page .textLayer > :not(.markedContent),
+.mf-pdf-page .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.mf-pdf-page .textLayer .markedContent { display: contents; }
+.mf-pdf-page .textLayer span[role="img"] { -webkit-user-select: none; user-select: none; cursor: default; }
+.mf-pdf-page .textLayer ::selection { background: rgb(0 0 255 / 0.25); color: transparent; }
+.mf-pdf-page .textLayer br::selection { background: transparent; }
+.mf-pdf-page .textLayer .endOfContent {
+  display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default;
+  -webkit-user-select: none; user-select: none;
+}
+.mf-pdf-page .textLayer.selecting .endOfContent { top: 0; }
+
+/* Swiping between messages (components/SwipePager.jsx) is horizontal scrolling: no scrollbar or
+   iOS scroll indicator for it. */
+.swipe-pager { scrollbar-width: none; }
+.swipe-pager::-webkit-scrollbar { display: none; }
+
+/* Email provider settings: a placeholder (an example ID, the suggested redirect URI) must not
+   read as a saved value, which in dark themes it did. */
+.mf-signin-form input::placeholder {
+  color: var(--text-tertiary);
+  opacity: 1;
+  font-style: italic;
+}

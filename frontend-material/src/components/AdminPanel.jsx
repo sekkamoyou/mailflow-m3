@@ -1,0 +1,8846 @@
+import AppearanceSyncSettings from './AppearanceSyncSettings.jsx';
+import PushPrioritiesSection from './PushPrioritiesSection.jsx';
+import SourceNotice from './SourceNotice.jsx';
+import frontendPackage from '../../package.json';
+import { useModalFocus } from '../material/useModalFocus.js';
+import { MaterialIcon } from '../material/controls.jsx';
+import { MaterialButton, MaterialInput, MaterialSelect, MaterialTextarea } from '../material/controls.jsx';
+import { useCallback, useState, useEffect, useLayoutEffect, useRef, useMemo, useId, Children, cloneElement, isValidElement } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useStore } from '../store/index.js';
+import { DEFAULT_APP_NAME } from '../store/appearance.js';
+import { getPluginMeta } from '../plugins/registry.js';
+import { PluginSlot } from '../plugins/PluginSlot.jsx';
+import { newAiAction, AI_ACTION_LIMITS } from '../aiActions.js';
+import { useMobile } from '../hooks/useMobile.js';
+import { api } from '../utils/api.js';
+import { spamApi } from '../utils/spamApi.js';
+import { copyToClipboard } from '../utils/clipboard.js';
+import { isValidFromValue } from '../utils/defaultSender.js';
+import { autoRecipientFields } from '../utils/autoRecipients.js';
+import {
+  AI_ACCOUNT_PROVIDER_OPTIONS,
+  AI_CONNECTION_METHOD_ACCOUNT,
+  AI_CONNECTION_METHOD_API,
+  AI_CONNECTION_METHOD_OPTIONS,
+  AI_PROVIDER_API_KEY,
+  AI_PROVIDER_CHATGPT,
+  OPENAI_MODELS_URL,
+  buildAiSavePayload,
+  createCodexDevicePoller,
+  isAiFormValid,
+  normalizeAiForm,
+  selectAiConnectionMethod,
+} from '../utils/aiConfig.js';
+import { THEMES, COLOR_PALETTES, getTheme, normalizeSeedColor } from '../themes.js';
+import { LAYOUTS, applyLayout } from '../layouts.js';
+import { NOTIFICATION_SOUNDS, playNotificationSound, playCustomSound, warmUpAudioContext } from '../utils/notificationSounds.js';
+import { usePushNotifications } from '../hooks/usePushNotifications.js';
+import SignatureEditor from './SignatureEditor.jsx';
+import DiagnosticsReportModal from './DiagnosticsReportModal.jsx';
+import { getEffectiveShortcuts, getGroupedActions, getShortcutConflicts, shortcutActionText, shortcutBindingFromEvent, SPECIAL_KEY_LABELS, parseModKey, modLabel } from '../utils/defaultShortcuts.js';
+import { isValidForwardAddress } from '../utils/ruleActions.js';
+import { folderParentLabel } from '../utils/folderDisplay.js';
+import AdminUserEditor from './AdminUserEditor.jsx';
+import AccountErrorCallout from './AccountErrorCallout.jsx';
+import SignInAgainDialog from './SignInAgainDialog.jsx';
+import AddAccountChooser from './AddAccountChooser.jsx';
+import MicrosoftSignIn from './MicrosoftSignIn.jsx';
+import GoogleSignIn from './GoogleSignIn.jsx';
+import { describeAccountError } from '../utils/accountErrors.js';
+import { detectProvider } from '../utils/providerDetect.js';
+import { formatRelativeTime, daysSince } from '../utils/relativeTime.js';
+import { formatDateTime, formatDay, formatTime } from '../utils/formatDate.js';
+import { htmlLang } from '../utils/browserLanguage.js';
+import SpamSettings from './SpamSettings.jsx';
+import BackupSettings from './BackupSettings.jsx';
+import PasswordInput from './PasswordInput.jsx';
+import ApiTokensSection from './ApiTokensSection.jsx';
+
+// ─── Shared field component ───────────────────────────────────────────────────
+function Field({ label, required, children }) {
+  const generatedId = useId();
+  let control;
+  Children.forEach(children, child => {
+    if (!control && isValidElement(child) && [MaterialInput, MaterialSelect, MaterialTextarea].includes(child.type)) control = child;
+  });
+  const id = control?.props.id || generatedId;
+  const details = [];
+  Children.forEach(children, child => {
+    if (isValidElement(child) && ['p', 'span', 'small'].includes(child.type)) details.push(child);
+  });
+  const descriptions = [control?.props['aria-describedby'], ...details.map((child, index) => child.props.id || `${id}-support-${index}`)].filter(Boolean).join(' ');
+  return (
+    <div className="md-field" style={{ marginBottom: 16 }}>
+      <label htmlFor={control ? id : undefined} className="md-field-label">
+        {label} {required && <span aria-hidden="true" style={{ color: 'var(--red)' }}>*</span>}
+      </label>
+      {Children.map(children, child => child === control
+        ? cloneElement(child, { id, 'aria-describedby': descriptions || undefined })
+        : details.includes(child) ? cloneElement(child, { id: child.props.id || `${id}-support-${details.indexOf(child)}` }) : child)}
+    </div>
+  );
+}
+
+const inputStyle = {
+  width: '100%', padding: '9px 12px',
+  background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
+  borderRadius: 7, color: 'var(--text-primary)', fontSize: 13,
+  outline: 'none', transition: 'border-color 0.15s', boxSizing: 'border-box',
+};
+
+const TOGGLE_OFF_BACKGROUND = 'var(--border)';
+
+// ─── Color picker ─────────────────────────────────────────────────────────────
+// Common mailbox icons (#376); any other emoji can be typed.
+const ACCOUNT_ICON_CHOICES = ['🏠', '💼', '🏢', '🎓', '🛒', '💰', '👨‍👩‍👧', '❤️', '🎮', '✈️', '📦', '🔒'];
+const COLORS = [
+  '#6366f1','#8b5cf6','#ec4899','#ef4444',
+  '#f97316','#eab308','var(--green)','#06b6d4','#3b82f6','#14b8a6',
+];
+
+// ─── IMAP presets ─────────────────────────────────────────────────────────────
+const PRESETS = {
+  gmail:   { label: 'Gmail',   imap_host: 'imap.gmail.com',        imap_port: 993, smtp_host: 'smtp.gmail.com',        smtp_port: 587 },
+  yahoo:   { label: 'Yahoo',   imap_host: 'imap.mail.yahoo.com',   imap_port: 993, smtp_host: 'smtp.mail.yahoo.com',   smtp_port: 587 },
+  icloud:  { label: 'iCloud',  imap_host: 'imap.mail.me.com',      imap_port: 993, smtp_host: 'smtp.mail.me.com',      smtp_port: 587 },
+  custom:  { label: 'Custom' },
+};
+
+// ─── Account Form (Add or Edit) ───────────────────────────────────────────────
+const OAUTH_PROVIDERS = new Set(['microsoft', 'google']);
+// Google's page for creating an app password (needs 2-Step Verification on the account).
+const GOOGLE_APP_PASSWORDS_URL = 'https://myaccount.google.com/apppasswords';
+// What a sign-in owns on the account; saving other settings never sends these for it.
+// The mailbox to open (auth_user) stays editable: it is how a shared or delegated mailbox is
+// reached with one's own sign-in.
+const OAUTH_OWNED_FIELDS = ['imap_host', 'imap_port', 'imap_tls', 'imap_skip_tls_verify', 'smtp_host', 'smtp_port', 'smtp_tls', 'auth_pass', 'smtp_auth_user', 'smtp_auth_pass'];
+function isMicrosoftImapHost(host) {
+  const h = (host || '').toLowerCase();
+  return h.includes('.outlook.com') || h.includes('office365.com') || h.includes('.hotmail.com') || h.includes('.live.com');
+}
+
+// prefill (add only): { email, preset } from the Add account chooser.
+// onMicrosoftSignIn (add only): switch to "Sign in with Microsoft" when an Outlook.com host is typed.
+// onSignInAgain (edit only): "Sign in again" for an account connected through a sign-in.
+function AccountForm({ initial, onSave, onCancel, prefill, onMicrosoftSignIn, onGoogleSignIn, onSignInAgain }) {
+  const { t } = useTranslation();
+  const { categorizationEnabled } = useStore();
+
+  const isEdit = !!initial?.id;
+  const signedInWith = isEdit && OAUTH_PROVIDERS.has(initial?.oauth_provider) ? initial.oauth_provider : null;
+  const [form, setForm] = useState(() => initial || {
+    name: '', email_address: prefill?.email || '', color: '#6366f1', protocol: 'imap',
+    imap_host: '', imap_port: 993, imap_skip_tls_verify: false,
+    smtp_host: '', smtp_port: 587, smtp_tls: 'STARTTLS',
+    smtp_auth_user: '', smtp_auth_pass: '',
+    auth_user: prefill?.email || '', auth_pass: '', categorization_enabled: false, antispam_enabled: false,
+    trusted_authserv_id: '',
+    ...(prefill?.preset && PRESETS[prefill.preset]?.imap_host ? { ...PRESETS[prefill.preset], label: undefined } : {}),
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  // Detected Authentication-Results authserv-ids for this account (setup helper
+  // for the trusted-authserv-id field). Fetched only for an existing account
+  // with antispam on, since that is when the backend classifies and records them.
+  const [detectedAuthservIds, setDetectedAuthservIds] = useState(null);
+  const [showPass, setShowPass] = useState(false);
+  const [showSmtpPass, setShowSmtpPass] = useState(false);
+  const [selectedPreset, setSelectedPreset] = useState(prefill?.preset || null);
+  const [mailPolicy, setMailPolicy] = useState({ allowPrivateHosts: false, allowInsecureTls: false, allowNonstandardPorts: false });
+  // Whether an Outlook.com address can be connected right away through Integrations, with the
+  // instance's own app or MailFlow's built-in one (#674). Asked only once one is typed, and
+  // only in a build that ships the built-in app; otherwise the note stays as it was.
+  const [msPersonalReady, setMsPersonalReady] = useState(false);
+  const [msWorkReady, setMsWorkReady] = useState(false);
+  const microsoftHost = isMicrosoftImapHost(form.imap_host);
+  // Which sign-in the Outlook host note offers: work or school for an address that is not a
+  // personal Microsoft one when work sign-in is set up, else personal.
+  const msSignInKind = detectProvider(form.email_address) !== 'microsoftPersonal' && msWorkReady ? 'work' : 'personal';
+  const msSignInOffered = msSignInKind === 'work' || msPersonalReady;
+  // Gmail and Google Workspace (imap.gmail.com, any address): sign in with Google when the
+  // instance's Google client is set up, else an app password, with where to make one.
+  const gmailHost = !isEdit && /^imap\.gmail\.com$/i.test((form.imap_host || '').trim());
+  const [googleSignInReady, setGoogleSignInReady] = useState(false);
+
+  useEffect(() => {
+    if (!microsoftHost && !gmailHost) return undefined;
+    let cancelled = false;
+    api.getIntegrationsStatus()
+      .then(d => {
+        if (cancelled) return;
+        setMsPersonalReady(!!d.microsoft?.builtinAppShipped && !!d.microsoft?.personalAccounts);
+        setMsWorkReady(!!d.microsoft?.workAccounts);
+        setGoogleSignInReady(!!d.google?.signIn);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [microsoftHost, gmailHost]);
+
+  useEffect(() => {
+    api.admin.getSettings()
+      .then(d => setMailPolicy({
+        allowPrivateHosts:     d.settings.allow_private_hosts === 'true',
+        allowInsecureTls:      d.settings.allow_insecure_tls === 'true',
+        allowNonstandardPorts: d.settings.allow_nonstandard_ports === 'true',
+      }))
+      .catch(() => {});
+  }, []);
+
+  // Setup helper: which authserv-ids this account's mail actually carries. The
+  // backend records them when it classifies, so the hint is only meaningful for
+  // an existing account with antispam on (and it fills in as mail arrives).
+  useEffect(() => {
+    if (!isEdit || !form.antispam_enabled) {
+      setDetectedAuthservIds(null);
+      return undefined;
+    }
+    let cancelled = false;
+    spamApi.getAuthservIds(initial.id)
+      .then(d => { if (!cancelled) setDetectedAuthservIds(d); })
+      .catch(() => { if (!cancelled) setDetectedAuthservIds(null); });
+    return () => { cancelled = true; };
+  }, [isEdit, form.antispam_enabled, initial?.id]);
+
+  const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
+  // The login follows the address (which is what it usually is) until the user edits the
+  // login itself, so correcting a prefilled address does not leave the old one as the login.
+  const [authUserEdited, setAuthUserEdited] = useState(false);
+  const setEmail = (value) => setForm(f => ({
+    ...f, email_address: value,
+    ...(!isEdit && !authUserEdited && (!f.auth_user || f.auth_user === f.email_address) ? { auth_user: value } : {}),
+  }));
+
+  const handlePreset = (key) => {
+    const p = PRESETS[key];
+    if (p.imap_host) setForm(f => ({ ...f, ...p, label: undefined }));
+    setSelectedPreset(key);
+  };
+
+  const handleSubmit = async () => {
+    // The login and server of a signed-in account are hidden and not editable: not required.
+    if (!form.email_address || (!signedInWith && (!form.auth_user || !form.imap_host))) {
+      setError(t('admin.accounts.errorRequired'));
+      return;
+    }
+    if (!isEdit && !form.auth_pass) {
+      setError(t('admin.accounts.errorPasswordRequired'));
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await onSave(form);
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      {/* Presets (add only) */}
+      {!isEdit && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 18, flexWrap: 'wrap' }}>
+          {Object.entries(PRESETS).map(([key]) => {
+            const active = selectedPreset === key;
+            const presetLabel = key === 'gmail' ? t('admin.accounts.presetGmail') : key === 'yahoo' ? t('admin.accounts.presetYahoo') : key === 'icloud' ? t('admin.accounts.presetIcloud') : t('admin.accounts.presetCustom');
+            return (
+              <MaterialButton variant="text" selected={active} key={key} onClick={() => handlePreset(key)} style={{
+                padding: '5px 12px', borderRadius: 'var(--md-sys-shape-corner-extra-large)', fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 500,
+                border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                background: active ? 'var(--accent-dim)' : 'transparent',
+                color: active ? 'var(--accent)' : 'var(--text-secondary)',
+                cursor: 'pointer', transition: 'all 0.12s',
+              }}>
+                {presetLabel}
+              </MaterialButton>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Color */}
+      <Field label={t('admin.accounts.color')}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {COLORS.map(c => (
+            <MaterialButton variant="icon" key={c} type="button" aria-pressed={form.color === c} selected={form.color === c} onClick={() => set('color', c)} style={{
+              width: 24, height: 24, borderRadius: '50%', background: c,
+              border: `2px solid ${form.color === c ? 'white' : 'transparent'}`,
+              cursor: 'pointer', outline: 'none', padding: 0,
+              boxShadow: form.color === c ? `0 0 0 1px ${c}` : 'none',
+            }} />
+          ))}
+        </div>
+      </Field>
+
+      {/* Icon (#376): an emoji shown in place of the color dot, or none. */}
+      <Field label={t('admin.accounts.icon')}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          {[null, ...ACCOUNT_ICON_CHOICES].map(choice => {
+            const active = (form.icon || null) === choice;
+            return (
+              <MaterialButton variant="icon" selected={active} key={choice ?? 'none'} type="button" onClick={() => set('icon', choice)}
+                aria-pressed={active} title={choice ? undefined : t('admin.accounts.iconNone')}
+                aria-label={choice ? undefined : t('admin.accounts.iconNone')}
+                style={{
+                  width: 30, height: 30, borderRadius: 'var(--md-sys-shape-corner-small)', padding: 0, fontSize: 'var(--md-sys-typescale-body-large-size)', lineHeight: 1,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                  border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                  background: active ? 'var(--accent-dim)' : 'transparent',
+                }}>
+                {choice ?? <span style={{ width: 10, height: 10, borderRadius: '50%', background: form.color, display: 'inline-block' }} />}
+              </MaterialButton>
+            );
+          })}
+          <MaterialInput
+            aria-label={t('admin.accounts.iconCustom')}
+            placeholder={t('admin.accounts.iconCustom')}
+            value={form.icon && !ACCOUNT_ICON_CHOICES.includes(form.icon) ? form.icon : ''}
+            onChange={e => set('icon', e.target.value.trim() || null)}
+            maxLength={16}
+            style={{ ...inputStyle, width: 150, padding: '6px 10px' }}
+          />
+        </div>
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 6 }}>{t('admin.accounts.iconHint')}</div>
+      </Field>
+
+      <Field label={t('admin.accounts.displayName')} required>
+        <MaterialInput value={form.name || ''} onChange={e => set('name', e.target.value)}
+          placeholder={t('admin.accounts.displayNamePh')} style={inputStyle}
+          
+           />
+      </Field>
+
+      <Field label={t('admin.accounts.senderName')}>
+        <MaterialInput value={form.sender_name || ''} onChange={e => set('sender_name', e.target.value)}
+          placeholder={t('admin.accounts.senderNamePh')} style={inputStyle}
+          
+           />
+      </Field>
+
+      {!isEdit && (
+        <Field label={t('admin.accounts.email')} required>
+          <MaterialInput value={form.email_address || ''} onChange={e => setEmail(e.target.value)}
+            placeholder={t('admin.accounts.emailPh')} style={inputStyle}
+            
+             />
+        </Field>
+      )}
+
+      {/* A Microsoft or Google sign-in owns the server: shown, not editable (#674). */}
+      {signedInWith ? (
+        <div data-signed-in-with={signedInWith} style={{
+          margin: '16px 0 0', padding: '12px 14px', borderRadius: 'var(--md-sys-shape-corner-small)', background: 'var(--bg-tertiary)',
+          border: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+        }}>
+          <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>
+              {t(signedInWith === 'google' ? 'accountForm.signedInGoogle' : 'accountForm.signedInMicrosoft', { email: initial.email_address })}
+            </div>
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2, lineHeight: 1.5 }}>{t('accountForm.signedInNote')}</div>
+          </div>
+          {onSignInAgain && (
+            <MaterialButton variant="outlined" type="button" onClick={onSignInAgain} style={{
+              padding: '7px 14px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)',
+              color: 'var(--text-primary)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, cursor: 'pointer',
+            }}>{t('accountErrors.action.signIn')}</MaterialButton>
+          )}
+        </div>
+      ) : null}
+      {/* Microsoft only: a shared or delegated Microsoft 365 mailbox opens with one's own sign-in
+          as its address; Gmail has no such way. */}
+      {signedInWith === 'microsoft' && (
+        <div style={{ marginTop: 14 }}>
+          <Field label={t('accountForm.mailboxLabel')}>
+            <MaterialInput value={form.auth_user || ''} onChange={e => set('auth_user', e.target.value)}
+              placeholder={initial.email_address} style={inputStyle}
+              
+               />
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 5, lineHeight: 1.5 }}>{t('accountForm.mailboxHelp')}</div>
+          </Field>
+        </div>
+      )}
+      {signedInWith ? null : (<>
+      <div style={{ height: 1, background: 'var(--border-subtle)', margin: '16px 0' }} />
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+        {t('admin.accounts.imapSection')}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', gap: 10 }}>
+        <Field label={t('admin.accounts.imapHost')} required>
+          <MaterialInput value={form.imap_host || ''} onChange={e => set('imap_host', e.target.value)}
+            placeholder={t('admin.accounts.imapHostPh')} style={inputStyle}
+            
+             />
+        </Field>
+        <Field label={t('admin.accounts.imapPort')}>
+          <MaterialInput
+            type={mailPolicy.allowNonstandardPorts ? 'text' : 'number'}
+            value={form.imap_port || 993}
+            onChange={e => set('imap_port', mailPolicy.allowNonstandardPorts ? e.target.value : parseInt(e.target.value))}
+            style={inputStyle}
+            
+             />
+        </Field>
+      </div>
+
+      <Field label={t('admin.accounts.authUser')} required>
+        <MaterialInput value={form.auth_user || ''} onChange={e => { setAuthUserEdited(true); set('auth_user', e.target.value); }}
+          placeholder={t('admin.accounts.authUserPh')} style={inputStyle}
+          
+           />
+      </Field>
+
+      <Field label={isEdit ? t('admin.accounts.password') + ' (' + t('admin.accounts.passwordPhEdit') + ')' : t('admin.accounts.password')} required={!isEdit}>
+        <div style={{ position: 'relative' }}>
+          <MaterialInput type={showPass ? 'text' : 'password'}
+            value={form.auth_pass || ''} onChange={e => set('auth_pass', e.target.value)}
+            placeholder={isEdit ? '••••••••' : t('admin.accounts.passwordPhNew')}
+            style={{ ...inputStyle, paddingRight: 36 }}
+            
+             />
+          <MaterialButton variant="icon" onClick={() => setShowPass(!showPass)} style={{
+            position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+            background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer',
+            display: 'flex', padding: 2,
+          }}>
+            <MaterialIcon name="visibility" />
+          </MaterialButton>
+        </div>
+      </Field>
+
+      {mailPolicy.allowInsecureTls && (
+        <div className="admin-setting-toggle admin-setting-support" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginTop: 10 }}>
+          <MaterialButton aria-label={t('admin.sso.allowInsecure')} aria-checked={form.allow_insecure} role="switch" variant="switch"
+            type="button"
+            onClick={() => set('imap_skip_tls_verify', !form.imap_skip_tls_verify)}
+            style={{
+              width: 36, height: 20, borderRadius: 'var(--md-sys-shape-corner-medium)', border: 'none', cursor: 'pointer', padding: 0,
+              background: form.imap_skip_tls_verify ? 'var(--amber)' : TOGGLE_OFF_BACKGROUND,
+              position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginTop: 1,
+            }}
+          >
+            <span style={{
+              position: 'absolute', top: 2, left: form.imap_skip_tls_verify ? 18 : 2, width: 16, height: 16,
+              borderRadius: '50%', background: 'white', transition: 'left 0.2s',
+            }} />
+          </MaterialButton>
+          <div>
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>{t('admin.accounts.skipTlsVerify')}</div>
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>{t('admin.accounts.skipTlsVerifyDesc')}</div>
+          </div>
+        </div>
+      )}
+
+      {isMicrosoftImapHost(form.imap_host) && (
+        <div style={{
+          display: 'flex', alignItems: 'flex-start', gap: 10,
+          padding: '10px 14px', marginTop: 10,
+          background: 'rgba(248,113,113,0.07)',
+          border: '1px solid rgba(248,113,113,0.3)',
+          borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-primary)',
+        }}>
+          <MaterialIcon name="error" />
+          <div>
+            <div style={{ fontWeight: 600, marginBottom: 3 }}>{t('admin.accounts.microsoftImapUnsupported')}</div>
+            <div style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              {!isEdit && msSignInOffered && onMicrosoftSignIn ? t('admin.accounts.microsoftImapNoteSignIn')
+                : msPersonalReady ? t('admin.accounts.microsoftImapNoteReady') : t('admin.accounts.microsoftImapNote')}
+            </div>
+            {!isEdit && msSignInOffered && onMicrosoftSignIn && (
+              <MaterialButton variant="filled" type="button" onClick={() => onMicrosoftSignIn(msSignInKind)} style={{
+                marginTop: 10, padding: '7px 14px', background: 'var(--accent)', border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)',
+                color: 'var(--accent-text)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, cursor: 'pointer',
+              }}>{t('msSignIn.titlePersonal')}</MaterialButton>
+            )}
+          </div>
+        </div>
+      )}
+
+      {gmailHost && (
+        <div data-gmail-note style={{
+          padding: '10px 14px', marginTop: 10, borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-medium-size)', lineHeight: 1.5,
+          background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)',
+        }}>
+          {googleSignInReady && onGoogleSignIn ? (
+            <>
+              <div>{t('googleSignIn.formNote')}</div>
+              <MaterialButton variant="filled" type="button" onClick={onGoogleSignIn} style={{
+                marginTop: 10, padding: '7px 14px', background: 'var(--accent)', border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)',
+                color: 'var(--accent-text)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, cursor: 'pointer',
+              }}>{t('googleSignIn.title')}</MaterialButton>
+            </>
+          ) : (
+            <>
+              <div>{t('googleSignIn.appPasswordNote')}</div>
+              <a href={GOOGLE_APP_PASSWORDS_URL} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 6, color: 'var(--accent)', fontWeight: 500 }}>
+                {t('googleSignIn.createAppPassword')}
+              </a>
+            </>
+          )}
+        </div>
+      )}
+
+      <div style={{ height: 1, background: 'var(--border-subtle)', margin: '4px 0 16px', marginTop: isMicrosoftImapHost(form.imap_host) || gmailHost ? 16 : '4px' }} />
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+        {t('admin.accounts.smtpSection')}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', gap: 10 }}>
+        <Field label={t('admin.accounts.smtpHost')}>
+          <MaterialInput value={form.smtp_host || ''} onChange={e => set('smtp_host', e.target.value)}
+            placeholder={t('admin.accounts.smtpHostPh')} style={inputStyle}
+            
+             />
+        </Field>
+        <Field label={t('admin.accounts.smtpPort')}>
+          <MaterialInput
+            type={mailPolicy.allowNonstandardPorts ? 'text' : 'number'}
+            value={form.smtp_port || 587}
+            onChange={e => set('smtp_port', mailPolicy.allowNonstandardPorts ? e.target.value : parseInt(e.target.value))}
+            style={inputStyle}
+            
+             />
+        </Field>
+      </div>
+
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 12, marginBottom: 4, lineHeight: 1.5 }}>
+        {t('admin.accounts.smtpAuthNote')}
+      </div>
+      <Field label={t('admin.accounts.smtpAuthUser')}>
+        <MaterialInput value={form.smtp_auth_user || ''} onChange={e => set('smtp_auth_user', e.target.value)}
+          placeholder={t('admin.accounts.smtpAuthUserPh')} style={inputStyle}
+          
+           />
+      </Field>
+      <Field label={t('admin.accounts.smtpAuthPass')}>
+        <div style={{ position: 'relative' }}>
+          <MaterialInput type={showSmtpPass ? 'text' : 'password'}
+            value={form.smtp_auth_pass || ''} onChange={e => set('smtp_auth_pass', e.target.value)}
+            placeholder={isEdit ? '••••••••' : ''}
+            style={{ ...inputStyle, paddingRight: 36 }}
+            
+             />
+          <MaterialButton variant="icon" type="button" onClick={() => setShowSmtpPass(!showSmtpPass)} style={{
+            position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+            background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer',
+            display: 'flex', padding: 2,
+          }}>
+            <MaterialIcon name="visibility" />
+          </MaterialButton>
+        </div>
+      </Field>
+      </>)}
+
+      <div style={{ height: 1, background: 'var(--border-subtle)', margin: '16px 0' }} />
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+        {t('admin.accounts.signatureSection')}
+      </div>
+      <SignatureEditor
+        value={form.signature || ''}
+        onChange={val => set('signature', val)}
+      />
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+        <MaterialInput type="checkbox" checked={form.signature_enabled !== false}
+          onChange={e => set('signature_enabled', e.target.checked)}
+          style={{ accentColor: 'var(--accent)' }} />
+        {t('admin.accounts.signatureEnabledDefault')}
+      </label>
+
+      {isEdit && (
+        <>
+          <div style={{ height: 1, background: 'var(--border-subtle)', margin: '16px 0' }} />
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+            {t('admin.accounts.autoRecipientsSection')}
+          </div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginBottom: 12, lineHeight: 1.5 }}>
+            {t('admin.accounts.autoRecipientsDesc')}
+          </div>
+          <Field label={t('compose.cc')}>
+            <MaterialInput value={form.auto_cc_text ?? (form.auto_cc_addresses || []).join(', ')}
+              onChange={e => set('auto_cc_text', e.target.value)}
+              placeholder={t('compose.ccPh')} style={inputStyle}
+              
+               />
+          </Field>
+          <Field label={t('compose.bcc')}>
+            <MaterialInput value={form.auto_bcc_text ?? (form.auto_bcc_addresses || []).join(', ')}
+              onChange={e => set('auto_bcc_text', e.target.value)}
+              placeholder={t('compose.bccPh')} style={inputStyle}
+              
+               />
+          </Field>
+
+          <div style={{ height: 1, background: 'var(--border-subtle)', margin: '16px 0' }} />
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+            {t('admin.accounts.unifiedInboxSection')}
+          </div>
+          <div className="admin-setting-toggle admin-setting-support" style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+            <MaterialButton aria-label={t('admin.accounts.unifiedInboxEnabled')} aria-checked={form.include_in_unified_inbox !== false} role="switch" variant="switch" selected={form.include_in_unified_inbox !== false}
+              type="button"
+              
+              onClick={() => set('include_in_unified_inbox', form.include_in_unified_inbox === false)}
+              style={{
+                width: 36, height: 20, borderRadius: 'var(--md-sys-shape-corner-medium)', border: 'none',
+                cursor: 'pointer', padding: 0,
+                background: form.include_in_unified_inbox !== false ? 'var(--accent)' : TOGGLE_OFF_BACKGROUND,
+                position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginTop: 1,
+              }}
+            >
+              <span style={{
+                position: 'absolute', top: 2,
+                left: form.include_in_unified_inbox !== false ? 18 : 2,
+                width: 16, height: 16,
+                borderRadius: '50%', background: 'white', transition: 'left 0.2s',
+              }} />
+            </MaterialButton>
+            <div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>{t('admin.accounts.unifiedInboxEnabled')}</div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                {t('admin.accounts.unifiedInboxEnabledDesc')}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ height: 1, background: 'var(--border-subtle)', margin: '16px 0' }} />
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+            {t('admin.accounts.categorizationSection')}
+          </div>
+          <div className="admin-setting-toggle admin-setting-support" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, opacity: categorizationEnabled ? 0.5 : 1 }}>
+            <MaterialButton aria-label={t('admin.accounts.categorizationEnabled')} aria-checked={categorizationEnabled || form.categorization_enabled} role="switch" variant="switch" selected={categorizationEnabled || form.categorization_enabled}
+              type="button"
+              disabled={categorizationEnabled}
+              onClick={() => !categorizationEnabled && set('categorization_enabled', !form.categorization_enabled)}
+              style={{
+                width: 36, height: 20, borderRadius: 'var(--md-sys-shape-corner-medium)', border: 'none',
+                cursor: categorizationEnabled ? 'not-allowed' : 'pointer', padding: 0,
+                background: (categorizationEnabled || form.categorization_enabled) ? 'var(--accent)' : TOGGLE_OFF_BACKGROUND,
+                position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginTop: 1,
+              }}
+            >
+              <span style={{
+                position: 'absolute', top: 2,
+                left: (categorizationEnabled || form.categorization_enabled) ? 18 : 2,
+                width: 16, height: 16,
+                borderRadius: '50%', background: 'white', transition: 'left 0.2s',
+              }} />
+            </MaterialButton>
+            <div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>{t('admin.accounts.categorizationEnabled')}</div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                {categorizationEnabled ? t('admin.accounts.enabledGlobally') : t('admin.accounts.categorizationEnabledDesc')}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ height: 1, background: 'var(--border-subtle)', margin: '16px 0' }} />
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+            {t('admin.accounts.antispamSection')}
+          </div>
+          <div className="admin-setting-toggle admin-setting-support" style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+            <MaterialButton aria-label={t('admin.accounts.antispamEnabled')} aria-checked={form.antispam_enabled} role="switch" variant="switch" selected={form.antispam_enabled}
+              type="button"
+              onClick={() => set('antispam_enabled', !form.antispam_enabled)}
+              style={{
+                width: 36, height: 20, borderRadius: 'var(--md-sys-shape-corner-medium)', border: 'none',
+                cursor: 'pointer', padding: 0,
+                background: form.antispam_enabled ? 'var(--accent)' : TOGGLE_OFF_BACKGROUND,
+                position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginTop: 1,
+              }}
+            >
+              <span style={{
+                position: 'absolute', top: 2,
+                left: form.antispam_enabled ? 18 : 2,
+                width: 16, height: 16,
+                borderRadius: '50%', background: 'white', transition: 'left 0.2s',
+              }} />
+            </MaterialButton>
+            <div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>{t('admin.accounts.antispamEnabled')}</div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                {t('admin.accounts.antispamEnabledDesc')}
+              </div>
+            </div>
+          </div>
+
+          {/* Trusted Authentication-Results authserv-id: only headers written by
+              this id are honored; empty means "trust none" (the auth signal is
+              then ignored rather than trusted blindly). */}
+          {form.antispam_enabled && (
+            <div style={{ marginTop: 14 }}>
+              <Field label={t('admin.accounts.trustedAuthservLabel')}>
+                <MaterialInput
+                  value={form.trusted_authserv_id || ''}
+                  onChange={e => set('trusted_authserv_id', e.target.value)}
+                  placeholder={t('admin.accounts.trustedAuthservPlaceholder')}
+                  style={inputStyle}
+                />
+              </Field>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: -8, lineHeight: 1.5 }}>
+                {t('admin.accounts.trustedAuthservDesc')}
+              </div>
+
+              {detectedAuthservIds && detectedAuthservIds.analyzed > 0 && detectedAuthservIds.detected.length > 0 && (
+                <div style={{ marginTop: 10, fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)' }}>
+                  <div>{t('admin.accounts.trustedAuthservDetected')}</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                    {detectedAuthservIds.detected.map(d => (
+                      <MaterialButton variant="outlined"
+                        key={d.id}
+                        type="button"
+                        onClick={() => set('trusted_authserv_id', d.id)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 6,
+                          padding: '4px 10px', borderRadius: 'var(--md-sys-shape-corner-large)', fontSize: 'var(--md-sys-typescale-body-small-size)',
+                          border: '1px solid var(--border)', background: 'var(--bg-secondary)',
+                          color: 'var(--text-secondary)', cursor: 'pointer',
+                        }}
+                      >
+                        <span style={{ fontFamily: 'monospace' }}>{d.id}</span>
+                        <span style={{ color: 'var(--text-tertiary)' }}>
+                          {d.count}/{detectedAuthservIds.analyzed}
+                        </span>
+                      </MaterialButton>
+                    ))}
+                  </div>
+                  <div style={{ marginTop: 8, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+                    {t('admin.accounts.trustedAuthservWarn')}
+                  </div>
+                </div>
+              )}
+              {detectedAuthservIds && (detectedAuthservIds.analyzed === 0 || detectedAuthservIds.detected.length === 0) && (
+                <div style={{ marginTop: 10, fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+                  {t('admin.accounts.trustedAuthservDetectedNone')}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {error && (
+        <div style={{
+          padding: '10px 14px', background: 'rgba(248,113,113,0.1)',
+          border: '1px solid rgba(248,113,113,0.3)', borderRadius: 'var(--md-sys-shape-corner-small)',
+          color: 'var(--red)', fontSize: 'var(--md-sys-typescale-body-medium-size)', marginBottom: 14,
+        }}>
+          {error}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+        <MaterialButton variant="filled" onClick={handleSubmit} disabled={saving || (!isEdit && isMicrosoftImapHost(form.imap_host))} style={{
+          flex: 1, padding: '10px', background: 'var(--accent)',
+          border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--accent-text)',
+          fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
+          cursor: (saving || (!isEdit && isMicrosoftImapHost(form.imap_host))) ? 'not-allowed' : 'pointer',
+          opacity: (saving || (!isEdit && isMicrosoftImapHost(form.imap_host))) ? 0.4 : 1,
+        }}>
+          {saving ? t('admin.accounts.saving') : (isEdit ? t('admin.accounts.saveChanges') : t('admin.accounts.addAccount'))}
+        </MaterialButton>
+        <MaterialButton variant="outlined" onClick={onCancel} style={{
+          padding: '10px 16px', background: 'var(--bg-tertiary)',
+          border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)',
+          color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-medium-size)',
+        }}>
+          {t('common.cancel')}
+        </MaterialButton>
+      </div>
+    </div>
+  );
+}
+
+// ─── Accounts Tab ─────────────────────────────────────────────────────────────
+function AccountsTab() {
+  const { t } = useTranslation();
+  const { accounts, setAccounts, updateAccount, setUnreadCounts, addNotification, backfillProgress, user, setAdminTab, accountsIntent, setAccountsIntent } = useStore();
+  const isAdmin = !!user?.isAdmin;
+  const [subview, setSubview] = useState('list'); // 'list' | 'add' | 'edit' | 'folders' | 'aliases'
+  const [signInTarget, setSignInTarget] = useState(null); // account being signed in again
+  const [focusedId, setFocusedId] = useState(null); // account row opened from the sidebar
+  const rowRefs = useRef({});
+  // Add account: the chooser, then the IMAP form or "Sign in with Microsoft" (#674).
+  const [addStep, setAddStep] = useState({ step: 'choose' }); // { step: 'choose' } | { step: 'form', preset, email } | { step: 'microsoft', mode }
+  const [msStatus, setMsStatus] = useState(null); // GET /api/integrations/status's microsoft entry
+  const [googleStatus, setGoogleStatus] = useState(null); // ...and its google entry
+  const startAdd = () => { setAddStep({ step: 'choose' }); setSubview('add'); };
+
+  useEffect(() => {
+    if (subview !== 'add') return undefined;
+    let cancelled = false;
+    setMsStatus(null);
+    api.getIntegrationsStatus()
+      .then(d => { if (!cancelled) { setMsStatus(d?.microsoft || {}); setGoogleStatus(d?.google || {}); } })
+      .catch(() => { if (!cancelled) { setMsStatus({}); setGoogleStatus({}); } });
+    return () => { cancelled = true; };
+  }, [subview]);
+
+  const chooseProvider = (choice, email) => {
+    if (choice === 'microsoftPersonal') setAddStep({ step: 'microsoft', mode: 'personal' });
+    else if (choice === 'microsoftWork') setAddStep({ step: 'microsoft', mode: 'work' });
+    // Gmail signs in on Google's page when the instance's Google client is set up; otherwise
+    // it is the app-password form.
+    else if (choice === 'gmail' && googleStatus?.signIn) setAddStep({ step: 'google' });
+    else setAddStep({ step: 'form', preset: choice === 'other' ? null : choice, email });
+  };
+  const reloadAccounts = () => api.getAccounts().then(setAccounts).catch(console.error);
+
+  // Opened from elsewhere: the empty inbox's Add account, or one account's row from the
+  // sidebar (and "Sign in again" if asked).
+  useEffect(() => {
+    if (!accountsIntent) return;
+    if (accountsIntent.action === 'add') {
+      setAccountsIntent(null);
+      startAdd();
+      return;
+    }
+    const target = accounts.find(a => a.id === accountsIntent.accountId);
+    setAccountsIntent(null);
+    if (!target) return;
+    setSubview('list');
+    setFocusedId(target.id);
+    if (accountsIntent.action === 'signIn') setSignInTarget(target);
+  }, [accountsIntent]); // eslint-disable-line react-hooks/exhaustive-deps -- acts once per intent
+  useEffect(() => {
+    if (!focusedId) return undefined;
+    rowRefs.current[focusedId]?.scrollIntoView?.({ block: 'nearest' });
+    const timer = setTimeout(() => setFocusedId(null), 2400);
+    return () => clearTimeout(timer);
+  }, [focusedId]);
+  const [editTarget, setEditTarget] = useState(null);
+  const [folderMappings, setFolderMappings] = useState({});
+  const [availableFolders, setAvailableFolders] = useState([]);
+  const [foldersLoading, setFoldersLoading] = useState(false);
+  const [foldersSaving, setFoldersSaving] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null);
+
+  // Alias form state
+  const [aliasFormMode, setAliasFormMode] = useState(null); // null | 'add' | 'edit'
+  const [aliasFormData, setAliasFormData] = useState({ name: '', email: '', reply_to: '', signature: '' });
+  const [aliasFormId, setAliasFormId] = useState(null);
+  const [aliasFormError, setAliasFormError] = useState('');
+  const [aliasFormSaving, setAliasFormSaving] = useState(false);
+
+  const handleAdd = async (form) => {
+    const account = await api.addAccount(form);
+    setAccounts([...accounts, account]);
+    setSubview('list');
+  };
+
+  const handleEdit = async (form) => {
+    const updates = { name: form.name, sender_name: form.sender_name || null, color: form.color, icon: form.icon || null, imap_host: form.imap_host, imap_port: form.imap_port, imap_skip_tls_verify: !!form.imap_skip_tls_verify, smtp_host: form.smtp_host, smtp_port: form.smtp_port, smtp_tls: form.smtp_tls, signature: form.signature || null, categorization_enabled: !!form.categorization_enabled, antispam_enabled: !!form.antispam_enabled, trusted_authserv_id: (form.trusted_authserv_id || '').trim() || null, include_in_unified_inbox: form.include_in_unified_inbox !== false };
+    Object.assign(updates, autoRecipientFields(form), { signature_enabled: form.signature_enabled !== false });
+    if (form.auth_pass) updates.auth_pass = form.auth_pass;
+    if (OAUTH_PROVIDERS.has(editTarget.oauth_provider)) {
+      // Sent only when it changed: a new login reconnects the account, and a cosmetic save
+      // (color, signature) must not. Left empty, it means the account's own address.
+      const mailbox = (form.auth_user || '').trim() || editTarget.email_address;
+      if (mailbox !== (editTarget.auth_user || editTarget.email_address)) updates.auth_user = mailbox;
+    } else if (form.auth_user) updates.auth_user = form.auth_user;
+    // Separate SMTP credentials (optional). A username sends both (a blank password on
+    // edit keeps the stored one); a blank username clears both back to the IMAP login.
+    if (form.smtp_auth_user) {
+      updates.smtp_auth_user = form.smtp_auth_user;
+      if (form.smtp_auth_pass) updates.smtp_auth_pass = form.smtp_auth_pass;
+    } else {
+      updates.smtp_auth_user = null;
+      updates.smtp_auth_pass = null;
+    }
+    if (OAUTH_PROVIDERS.has(editTarget.oauth_provider)) for (const field of OAUTH_OWNED_FIELDS) delete updates[field];
+    const updated = await api.updateAccount(editTarget.id, updates);
+    updateAccount(editTarget.id, updated);
+    api.getUnreadCounts().then(setUnreadCounts).catch(console.error);
+    setSubview('list');
+    setEditTarget(null);
+  };
+
+  const handleDelete = (id) => {
+    // Its scheduled messages go with it (#543, design 1.1): the dialog opens at once, and says how
+    // many when the count arrives; without it (the request failed) it says the rest.
+    const body = t('admin.accounts.deleteBody');
+    setConfirmDialog({
+      accountId: id,
+      title: t('admin.accounts.deleteTitle'),
+      message: body,
+      confirmLabel: t('admin.accounts.deleteConfirm'),
+      onConfirm: async () => {
+        await api.deleteAccount(id);
+        setAccounts(accounts.filter(a => a.id !== id));
+      },
+    });
+    api.scheduled.count(id).then((r) => {
+      const scheduled = Number(r?.count) || 0;
+      if (scheduled <= 0) return;
+      setConfirmDialog(d => (d?.accountId === id
+        ? { ...d, message: `${body} ${t('admin.accounts.deleteScheduled', { n: scheduled })}` } : d));
+    }, () => {});
+  };
+
+  const handleReconnect = async (id) => {
+    await api.reconnectAccount(id);
+    updateAccount(id, { sync_error: null, sync_error_code: null });
+  };
+
+  const handleReindex = async (id) => {
+    try {
+      await api.reindexAccount(id);
+    } catch (err) {
+      addNotification({ type: 'error', title: t('admin.accounts.reindexError'), body: err.message });
+    }
+  };
+
+  const handleSyncFolders = async (id) => {
+    try {
+      await api.syncFoldersNow(id);
+    } catch (err) {
+      addNotification({ type: 'error', title: t('admin.accounts.syncFoldersError'), body: err.message });
+    }
+  };
+
+  const handleFolderMappingOpen = async (account) => {
+    setEditTarget(account);
+    setFolderMappings(account.folder_mappings || {});
+    setSubview('folders');
+    setFoldersLoading(true);
+    try {
+      const folders = await api.getFolders(account.id);
+      setAvailableFolders(folders);
+    } catch (err) {
+      addNotification({ type: 'error', title: 'Could not load folders', body: err.message });
+    } finally {
+      setFoldersLoading(false);
+    }
+  };
+
+  const handleFolderMappingsSave = async () => {
+    setFoldersSaving(true);
+    try {
+      const cleanMappings = {};
+      for (const [key, val] of Object.entries(folderMappings)) {
+        if (val) cleanMappings[key] = val;
+      }
+      await api.updateAccount(editTarget.id, { folder_mappings: cleanMappings });
+      updateAccount(editTarget.id, { folder_mappings: cleanMappings });
+      setSubview('list');
+      setEditTarget(null);
+    } catch (err) {
+      addNotification({ type: 'error', title: 'Could not save folder mappings', body: err.message });
+    } finally {
+      setFoldersSaving(false);
+    }
+  };
+
+  const handleAliasOpen = (account) => {
+    setEditTarget(account);
+    setAliasFormMode(null);
+    setAliasFormData({ name: '', email: '', reply_to: '', signature: '' });
+    setAliasFormError('');
+    setSubview('aliases');
+  };
+
+  const handleAliasSave = async () => {
+    if (!aliasFormData.name || !aliasFormData.email) {
+      setAliasFormError(t('admin.aliases.errorRequired'));
+      return;
+    }
+    setAliasFormSaving(true);
+    setAliasFormError('');
+    try {
+      const payload = {
+        name: aliasFormData.name,
+        email: aliasFormData.email,
+        reply_to: aliasFormData.reply_to || null,
+        signature: aliasFormData.signature || null,
+      };
+      let saved;
+      if (aliasFormMode === 'add') {
+        saved = await api.addAlias(editTarget.id, payload);
+        const newAliases = [...(editTarget.aliases || []), saved];
+        updateAccount(editTarget.id, { aliases: newAliases });
+        setEditTarget(prev => ({ ...prev, aliases: newAliases }));
+      } else {
+        saved = await api.updateAlias(editTarget.id, aliasFormId, payload);
+        const newAliases = (editTarget.aliases || []).map(a => a.id === aliasFormId ? saved : a);
+        updateAccount(editTarget.id, { aliases: newAliases });
+        setEditTarget(prev => ({ ...prev, aliases: newAliases }));
+      }
+      setAliasFormMode(null);
+      setAliasFormData({ name: '', email: '', reply_to: '', signature: '' });
+      setAliasFormId(null);
+    } catch (err) {
+      setAliasFormError(err.message);
+    } finally {
+      setAliasFormSaving(false);
+    }
+  };
+
+  const handleAliasEdit = (alias) => {
+    setAliasFormId(alias.id);
+    setAliasFormData({
+      name: alias.name,
+      email: alias.email,
+      reply_to: alias.reply_to || '',
+      signature: alias.signature || '',
+    });
+    setAliasFormError('');
+    setAliasFormMode('edit');
+  };
+
+  const handleAliasDelete = (aliasId) => {
+    setConfirmDialog({
+      title: t('admin.aliases.deleteConfirmTitle'),
+      message: t('admin.aliases.deleteConfirmBody'),
+      confirmLabel: t('admin.aliases.deleteConfirmLabel'),
+      onConfirm: async () => {
+        await api.deleteAlias(editTarget.id, aliasId);
+        const newAliases = (editTarget.aliases || []).filter(a => a.id !== aliasId);
+        updateAccount(editTarget.id, { aliases: newAliases });
+        setEditTarget(prev => ({ ...prev, aliases: newAliases }));
+      },
+    });
+  };
+
+  if (subview === 'add') {
+    const toChooser = () => setAddStep({ step: 'choose' });
+    const toList = () => setSubview('list');
+    return (
+      <div>
+        <MaterialButton variant="text" onClick={addStep.step === 'choose' ? toList : toChooser} style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          background: 'none', border: 'none', color: 'var(--text-secondary)',
+          cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-medium-size)', padding: '0 0 16px 0',
+        }}>
+          <MaterialIcon name="chevron_left" />
+          {addStep.step === 'choose' ? t('sidebar.backToAccounts') : t('msSignIn.back')}
+        </MaterialButton>
+        {addStep.step === 'choose' && (
+          <AddAccountChooser status={msStatus} googleStatus={googleStatus} isAdmin={isAdmin} onChoose={chooseProvider}
+            onOpenSettings={() => setAdminTab('mail-signin')} />
+        )}
+        {addStep.step === 'microsoft' && (
+          <MicrosoftSignIn mode={addStep.mode} status={msStatus}
+            onSignedIn={reloadAccounts}
+            onDone={() => { reloadAccounts(); toList(); }}
+            onCancel={toChooser} />
+        )}
+        {addStep.step === 'google' && (
+          <GoogleSignIn onSignedIn={reloadAccounts} onDone={() => { reloadAccounts(); toList(); }} onCancel={toChooser} />
+        )}
+        {addStep.step === 'form' && (
+          <>
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 20 }}>
+              {t('admin.accounts.addTitle')}
+            </div>
+            <AccountForm key={`${addStep.preset}:${addStep.email}`} prefill={addStep} onSave={handleAdd} onCancel={toChooser}
+              onMicrosoftSignIn={(kind) => setAddStep({ step: 'microsoft', mode: kind === 'work' ? 'work' : 'personal' })}
+              onGoogleSignIn={() => setAddStep({ step: 'google' })} />
+          </>
+        )}
+      </div>
+    );
+  }
+
+  if (subview === 'edit' && editTarget) {
+    return (
+      <div>
+        <MaterialButton variant="text" onClick={() => { setSubview('list'); setEditTarget(null); }} style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          background: 'none', border: 'none', color: 'var(--text-secondary)',
+          cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-medium-size)', padding: '0 0 16px 0',
+        }}>
+          <MaterialIcon name="chevron_left" />
+          {t('sidebar.backToAccounts')}
+        </MaterialButton>
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+          {t('admin.accounts.editTitle')}
+        </div>
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginBottom: 20 }}>
+          {editTarget.email_address}
+        </div>
+        <AccountForm initial={editTarget} onSave={handleEdit} onCancel={() => { setSubview('list'); setEditTarget(null); }}
+          onSignInAgain={() => setSignInTarget(editTarget)} />
+        {signInTarget && (
+          <SignInAgainDialog account={signInTarget} onClose={() => setSignInTarget(null)}
+            onSignedIn={() => api.getAccounts().then(setAccounts).catch(console.error)} />
+        )}
+      </div>
+    );
+  }
+
+  if (subview === 'aliases' && editTarget) {
+    const backBtn = (
+      <MaterialButton variant="text" onClick={() => { setSubview('list'); setEditTarget(null); setAliasFormMode(null); setAliasFormError(''); }} style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        background: 'none', border: 'none', color: 'var(--text-secondary)',
+        cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-medium-size)', padding: '0 0 16px 0',
+      }}>
+        <MaterialIcon name="chevron_left" />
+        {t('sidebar.backToAccounts')}
+      </MaterialButton>
+    );
+
+    if (aliasFormMode) {
+      return (
+        <div>
+          {backBtn}
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+            {aliasFormMode === 'add' ? t('admin.aliases.newTitle') : t('admin.aliases.editTitle')}
+          </div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginBottom: 20 }}>
+            {editTarget.email_address}
+          </div>
+
+          <Field label={t('admin.aliases.name')} required>
+            <MaterialInput value={aliasFormData.name} onChange={e => setAliasFormData(f => ({ ...f, name: e.target.value }))}
+              placeholder={t('admin.aliases.namePh')} style={inputStyle}
+              
+               />
+          </Field>
+          <Field label={t('admin.aliases.email')} required>
+            <MaterialInput value={aliasFormData.email} onChange={e => setAliasFormData(f => ({ ...f, email: e.target.value }))}
+              placeholder={t('admin.aliases.emailPh')} style={inputStyle}
+              
+               />
+          </Field>
+          <Field label={t('admin.aliases.replyTo')}>
+            <MaterialInput value={aliasFormData.reply_to} onChange={e => setAliasFormData(f => ({ ...f, reply_to: e.target.value }))}
+              placeholder={t('admin.aliases.replyToPh')} style={inputStyle}
+              
+               />
+          </Field>
+
+          <div style={{ height: 1, background: 'var(--border-subtle)', margin: '16px 0' }} />
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 6, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+            {t('admin.aliases.signatureSection')}
+          </div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginBottom: 10 }}>
+            {t('admin.aliases.signatureNote')}
+          </div>
+          <SignatureEditor
+            value={aliasFormData.signature}
+            onChange={val => setAliasFormData(f => ({ ...f, signature: val }))}
+          />
+
+          {aliasFormError && (
+            <div style={{
+              padding: '10px 14px', background: 'rgba(248,113,113,0.1)',
+              border: '1px solid rgba(248,113,113,0.3)', borderRadius: 'var(--md-sys-shape-corner-small)',
+              color: 'var(--red)', fontSize: 'var(--md-sys-typescale-body-medium-size)', marginBottom: 14,
+            }}>
+              {aliasFormError}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <MaterialButton variant="filled" onClick={handleAliasSave} disabled={aliasFormSaving} style={{
+              flex: 1, padding: '10px', background: 'var(--accent)',
+              border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--accent-text)',
+              fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, cursor: aliasFormSaving ? 'not-allowed' : 'pointer',
+              opacity: aliasFormSaving ? 0.7 : 1,
+            }}>
+              {aliasFormSaving ? t('admin.aliases.saving') : t('admin.aliases.save')}
+            </MaterialButton>
+            <MaterialButton variant="outlined" onClick={() => { setAliasFormMode(null); setAliasFormError(''); }} style={{
+              padding: '10px 16px', background: 'var(--bg-tertiary)',
+              border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)',
+              color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-medium-size)',
+            }}>
+              {t('common.cancel')}
+            </MaterialButton>
+          </div>
+        </div>
+      );
+    }
+
+    const aliases = editTarget.aliases || [];
+    return (
+      <>
+      <div>
+        {backBtn}
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+          {t('admin.aliases.title')}
+        </div>
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginBottom: 16 }}>
+          {editTarget.email_address}
+        </div>
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.6, padding: '10px 12px', background: 'var(--bg-tertiary)', borderRadius: 'var(--md-sys-shape-corner-small)', border: '1px solid var(--border-subtle)' }}>
+          {t('admin.aliases.description')}
+        </div>
+
+        <MaterialButton variant="filled"
+          onClick={() => { setAliasFormData({ name: '', email: '', reply_to: '', signature: '' }); setAliasFormMode('add'); }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '7px 12px', background: 'var(--accent)',
+            border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--accent-text)',
+            cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 500, marginBottom: 16,
+          }}
+        >
+          <MaterialIcon name="add" />
+          {t('admin.aliases.addButton')}
+        </MaterialButton>
+
+        {aliases.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-tertiary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>
+            {t('admin.aliases.empty')}
+          </div>
+        ) : (
+          aliases.map(alias => (
+            <div key={alias.id} style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '12px 14px', marginBottom: 8,
+              border: '1px solid var(--border-subtle)', borderRadius: 'var(--md-sys-shape-corner-medium)',
+              background: 'var(--bg-tertiary)',
+            }}>
+              <div style={{
+                width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
+                background: 'var(--bg-hover)', display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+                color: 'var(--text-secondary)',
+              }}>
+                <MaterialIcon name="person" />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)' }}>
+                  {alias.name}
+                </div>
+                <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 1 }}>
+                  {alias.email}
+                </div>
+                {alias.reply_to && (
+                  <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 1 }}>
+                    {t('admin.aliases.replyToLabel')} {alias.reply_to}
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                <IconBtn onClick={() => handleAliasEdit(alias)} title={t('common.edit')}>
+                  <MaterialIcon name="edit_square" />
+                </IconBtn>
+                <IconBtn onClick={() => handleAliasDelete(alias.id)} title={t('common.delete')} danger>
+                  <MaterialIcon name="delete" />
+                </IconBtn>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+      <ConfirmOverlay dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
+      </>
+    );
+  }
+
+  if (subview === 'folders' && editTarget) {
+    const FOLDER_ROLES = [
+      { key: 'sent',    label: t('admin.folderMappings.sent'),    specialUse: '\\Sent' },
+      { key: 'drafts',  label: t('admin.folderMappings.drafts'),  specialUse: '\\Drafts' },
+      { key: 'trash',   label: t('admin.folderMappings.trash'),   specialUse: '\\Trash' },
+      { key: 'spam',    label: t('admin.folderMappings.spam'),    specialUse: '\\Junk' },
+      { key: 'archive', label: t('admin.folderMappings.archive'), specialUse: '\\Archive' },
+    ];
+    const selectStyle = {
+      width: '100%', padding: '8px 10px',
+      background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+      borderRadius: 7, color: 'var(--text-primary)', fontSize: 13,
+      outline: 'none', cursor: 'pointer',
+    };
+    return (
+      <div>
+        <MaterialButton variant="text" onClick={() => { setSubview('list'); setEditTarget(null); }} style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          background: 'none', border: 'none', color: 'var(--text-secondary)',
+          cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-medium-size)', padding: '0 0 16px 0',
+        }}>
+          <MaterialIcon name="chevron_left" />
+          {t('sidebar.backToAccounts')}
+        </MaterialButton>
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+          {t('admin.folderMappings.title')}
+        </div>
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginBottom: 20 }}>
+          {editTarget.email_address}
+        </div>
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.6, padding: '10px 12px', background: 'var(--bg-tertiary)', borderRadius: 'var(--md-sys-shape-corner-small)', border: '1px solid var(--border-subtle)' }}>
+          {t('admin.folderMappings.description')}
+        </div>
+        {foldersLoading ? (
+          <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-tertiary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>
+            {t('admin.folderMappings.loading')}
+          </div>
+        ) : (
+          FOLDER_ROLES.map(role => {
+            const autoFolder = availableFolders.find(f => f.special_use === role.specialUse);
+            return (
+              <div key={role.key} style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 5 }}>
+                  {role.label}
+                </label>
+                <MaterialSelect aria-label={role.label}
+                  value={folderMappings[role.key] || ''}
+                  onChange={e => setFolderMappings(m => ({ ...m, [role.key]: e.target.value }))}
+                  style={selectStyle}
+                >
+                  <option value="" style={{ background: 'var(--bg-tertiary)' }}>
+                    {autoFolder ? `${t('admin.folderMappings.autoDetect')} (${autoFolder.path})` : t('admin.folderMappings.autoDetectNone')}
+                  </option>
+                  {availableFolders.filter(f => !f.no_select).map(f => (
+                    <option key={f.path} value={f.path} style={{ background: 'var(--bg-tertiary)' }}>
+                      {f.path}
+                    </option>
+                  ))}
+                </MaterialSelect>
+              </div>
+            );
+          })
+        )}
+        <MaterialButton variant="filled"
+          onClick={handleFolderMappingsSave}
+          disabled={foldersSaving || foldersLoading}
+          style={{
+            marginTop: 8, padding: '9px 20px', background: 'var(--accent)',
+            border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--accent-text)',
+            fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, cursor: (foldersSaving || foldersLoading) ? 'not-allowed' : 'pointer',
+            opacity: (foldersSaving || foldersLoading) ? 0.7 : 1,
+          }}
+        >
+          {foldersSaving ? t('admin.folderMappings.saving') : t('admin.folderMappings.save')}
+        </MaterialButton>
+      </div>
+    );
+  }
+
+  return (
+    <>
+    <div>
+      <div className="admin-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)' }}>
+          {t('admin.accounts.title')}
+        </div>
+        <MaterialButton variant="filled" onClick={startAdd} style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '7px 12px', background: 'var(--accent)',
+          border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--accent-text)',
+          cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 500,
+        }}>
+          <MaterialIcon name="add" />
+          {t('admin.accounts.addButton')}
+        </MaterialButton>
+      </div>
+
+      {accounts.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-tertiary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>
+          <div>{t('admin.accounts.empty')}</div>
+          <MaterialButton variant="filled" type="button" onClick={startAdd} style={{
+            marginTop: 14, padding: '8px 16px', background: 'var(--accent)', border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)',
+            color: 'var(--accent-text)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, cursor: 'pointer',
+          }}>{t('admin.accounts.addButton')}</MaterialButton>
+        </div>
+      )}
+
+      {accounts.map(account => (
+        <div key={account.id} ref={el => { rowRefs.current[account.id] = el; }} data-account-id={account.id} style={{
+          border: `1px solid ${focusedId === account.id ? 'var(--accent)' : 'var(--border-subtle)'}`, borderRadius: 'var(--md-sys-shape-corner-medium)',
+          background: 'var(--bg-tertiary)', marginBottom: 10, overflow: 'hidden',
+          transition: 'border-color 0.3s',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', flexWrap: 'wrap' }}>
+            <div className="admin-account-identity">
+              <div style={{
+                width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+                background: account.color, display: 'flex', alignItems: 'center',
+                justifyContent: 'center', fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'white',
+              }}>
+                {account.name?.[0]?.toUpperCase() || '?'}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {account.name}
+                </div>
+                <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {account.email_address}
+                </div>
+                <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', marginTop: 3, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  {account.sync_error ? (
+                    // The full error, and what to do about it, is in the callout below.
+                    <span style={{ color: 'var(--red)' }}>⚠ {t(describeAccountError(account).labelKey)}</span>
+                  ) : (
+                    <>
+                      <span style={{ color: 'var(--green)' }}>● {t('admin.accounts.connected')}</span>
+                      <span style={{ color: 'var(--text-tertiary)' }}>
+                        {account.imap_host}:{account.imap_port}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="admin-account-actions" role="group" aria-label={t('admin.accounts.title')}>
+              {account.sync_error && (
+                <IconBtn onClick={() => handleReconnect(account.id)} title={t('sidebar.accountMenu.tryAgain')}>
+                  <MaterialIcon name="refresh" />
+                </IconBtn>
+              )}
+              <IconBtn onClick={() => { setEditTarget(account); setSubview('edit'); }} title={t('common.edit')}>
+                <MaterialIcon name="edit_square" />
+              </IconBtn>
+              <IconBtn onClick={() => handleFolderMappingOpen(account)} title={t('admin.accounts.folderMappings')}>
+                <MaterialIcon name="folder" />
+              </IconBtn>
+              <IconBtn onClick={() => handleAliasOpen(account)} title={t('admin.accounts.aliases')}>
+                <MaterialIcon name="person" />
+              </IconBtn>
+              <IconBtn onClick={() => handleSyncFolders(account.id)} title={t('admin.accounts.syncFolders')}>
+                <MaterialIcon name="folder" />
+              </IconBtn>
+              <IconBtn onClick={() => handleReindex(account.id)} title={t('admin.accounts.reindex')} disabled={!!backfillProgress[account.id]}>
+                <MaterialIcon name="search" />
+              </IconBtn>
+              <IconBtn onClick={() => handleDelete(account.id)} title={t('common.remove')} danger>
+                <MaterialIcon name="delete" />
+              </IconBtn>
+            </div>
+          </div>
+
+          <AccountErrorCallout
+            account={account}
+            isAdmin={isAdmin}
+            onRetry={() => handleReconnect(account.id).catch(err => addNotification({ type: 'error', title: t('accountErrors.action.retry'), body: err.message }))}
+            onSignIn={() => setSignInTarget(account)}
+            onEdit={() => { setEditTarget(account); setSubview('edit'); }}
+            onOpenIntegrations={() => setAdminTab('mail-signin')}
+          />
+
+          {/* Connection details bar */}
+          <div style={{
+            padding: '8px 14px', borderTop: '1px solid var(--border-subtle)',
+            background: 'var(--bg-secondary)',
+            display: 'flex', gap: 20, flexWrap: 'wrap',
+          }}>
+            {[
+              ['IMAP', `${account.imap_host}:${account.imap_port}`],
+              ['SMTP', `${account.smtp_host}:${account.smtp_port}`],
+              [t('admin.accounts.lastSync'), account.last_sync ? formatTime(account.last_sync) : t('common.never')],
+            ].map(([label, val]) => (
+              <div key={label} style={{ fontSize: 'var(--md-sys-typescale-body-small-size)' }}>
+                <span style={{ color: 'var(--text-tertiary)' }}>{label} </span>
+                <span style={{ color: 'var(--text-secondary)', fontFamily: 'JetBrains Mono, monospace' }}>{val}</span>
+              </div>
+            ))}
+            {backfillProgress[account.id] && (
+              <div style={{ width: '100%', marginTop: 4 }}>
+                <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginBottom: 4 }}>
+                  {backfillProgress[account.id].total
+                    ? t('admin.accounts.reindexProgress', {
+                        synced: backfillProgress[account.id].synced,
+                        total: backfillProgress[account.id].total,
+                      })
+                    : t('admin.accounts.reindexing')}
+                </div>
+                {backfillProgress[account.id].total && (
+                  <div style={{ height: 3, borderRadius: 'var(--md-sys-shape-corner-extra-small)', background: 'var(--border-subtle)', overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%', borderRadius: 'var(--md-sys-shape-corner-extra-small)',
+                      background: 'var(--accent)',
+                      width: `${Math.min(100, Math.round((backfillProgress[account.id].synced / backfillProgress[account.id].total) * 100))}%`,
+                      transition: 'width 0.3s ease',
+                    }} />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+      <ConfirmOverlay dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
+      {signInTarget && (
+        <SignInAgainDialog
+          account={signInTarget}
+          onClose={() => setSignInTarget(null)}
+          onSignedIn={() => api.getAccounts().then(setAccounts).catch(console.error)}
+        />
+      )}
+    </div>
+    </>
+  );
+}
+
+function AppBrandingSettings() {
+  const { t } = useTranslation();
+  const { user, serverDisplayName: appDisplayName, setAppDisplayName } = useStore();
+  const [name, setName] = useState(appDisplayName);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => { setName(appDisplayName); }, [appDisplayName]);
+  if (!user?.isAdmin) return null;
+  const resolvedName = name.trim() || DEFAULT_APP_NAME;
+  const save = async event => {
+    event.preventDefault();
+    setSaving(true); setError('');
+    try {
+      await api.admin.updateSettings({ app_display_name: name });
+      setAppDisplayName(resolvedName);
+      setName(resolvedName);
+    } catch (err) {
+      setError(t(err.code === 'INVALID_APP_NAME' ? 'admin.appearance.brandingInvalidName' : 'admin.appearance.brandingSaveError'));
+    } finally { setSaving(false); }
+  };
+  return <section style={{ marginTop: 28, paddingTop: 24, borderTop: '1px solid var(--border-subtle)' }}>
+    <h3 style={{ margin: '0 0 8px' }}>{t('admin.appearance.brandingTitle')}</h3>
+    <p>{t('admin.appearance.brandingDescription')}</p>
+    <form onSubmit={save}>
+      <Field label={t('admin.appearance.appDisplayName')}>
+        <MaterialInput name="app_display_name" value={name} maxLength={60} onChange={event => { setName(event.target.value); setError(''); }}
+          aria-invalid={error ? true : undefined} aria-describedby={error ? 'instance-name-error' : undefined} style={{ width: '100%' }} />
+        <small>{t('admin.appearance.appDisplayNameHint')}</small>
+      </Field>
+      {error && <p id="instance-name-error" role="alert" style={{ color: 'var(--md-sys-color-error)' }}>{error}</p>}
+      <MaterialButton variant="filled" type="submit" disabled={saving || resolvedName === appDisplayName}>{t('common.save')}</MaterialButton>
+    </form>
+  </section>;
+}
+
+// ─── Themes Tab ───────────────────────────────────────────────────────────────
+function ThemesTab() {
+  const { t } = useTranslation();
+  const { theme, setTheme, colorPalette, customColor, setColorPalette, darkEmailBodies, setDarkEmailBodies } = useStore();
+  const [customDraft, setCustomDraft] = useState(customColor);
+  const [customError, setCustomError] = useState(false);
+  const customHintId = useId();
+  const customErrorId = useId();
+  const customSelected = colorPalette.startsWith('#');
+  useEffect(() => { setCustomDraft(customColor); setCustomError(false); }, [customColor]);
+
+  return (
+    <div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+        {t('admin.appearance.title')}
+      </div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', marginBottom: 20 }}>
+        {t('admin.appearance.description')}
+      </div>
+
+      <AppearanceSyncSettings />
+      <div style={{ marginBottom: 20 }}>
+        <ToggleRow
+          label={t('admin.appearance.darkEmailBodies')}
+          desc={t('admin.appearance.darkEmailBodiesDesc')}
+          checked={darkEmailBodies}
+          onChange={setDarkEmailBodies}
+        />
+      </div>
+
+      <div role="radiogroup" aria-label={t('admin.appearance.title')} style={{ display: 'grid', gap: 8 }}>
+        {Object.entries(THEMES).map(([key, themeObj]) => (
+          <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', border: '1px solid var(--md-sys-color-outline-variant)', borderRadius: 'var(--md-sys-shape-corner-medium)', cursor: 'pointer' }}>
+            <MaterialInput type="radio" name="material-theme" value={key} checked={theme === key} onChange={() => setTheme(key)} />
+            <span aria-hidden="true" style={{ display: 'flex', gap: 4 }}>
+              {getTheme(key, colorPalette).preview.map((color, i) => <span key={i} style={{ width: 20, height: 20, borderRadius: 'var(--md-sys-shape-corner-full)', background: color }} />)}
+            </span>
+            <span>
+              <span style={{ display: 'block', color: 'var(--md-sys-color-on-surface)' }}>{t(`material.themes.${key}.label`, { defaultValue: themeObj.label })}</span>
+              {key === 'system' && <span style={{ display: 'block', color: 'var(--md-sys-color-on-surface-variant)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>{t('material.themes.system.description')}</span>}
+            </span>
+          </label>
+        ))}
+      </div>
+
+      <fieldset style={{ border: 0, padding: 0, margin: '24px 0 0', minWidth: 0 }}>
+        <legend style={{ padding: 0, marginBottom: 12, fontSize: 'var(--md-sys-typescale-title-small-size)' }}>{t('material.palettes.title')}</legend>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {Object.entries(COLOR_PALETTES).map(([key, palette]) => (
+            <label key={key} style={{ display: 'flex', flex: '1 1 auto', alignItems: 'center', gap: 10, minHeight: 56, padding: '8px 12px', border: `1px solid var(${colorPalette === key ? '--md-sys-color-primary' : '--md-sys-color-outline-variant'})`, borderRadius: 'var(--md-sys-shape-corner-medium)', cursor: 'pointer', background: colorPalette === key ? 'var(--md-sys-color-secondary-container)' : 'transparent' }}>
+              <MaterialInput type="radio" name="material-palette" value={key} checked={colorPalette === key} onChange={() => setColorPalette(key)} />
+              <span aria-hidden="true" style={{ width: 20, height: 20, flexShrink: 0, borderRadius: '50%', background: palette.light.vars['--md-sys-color-primary'] }} />
+              <span style={{ overflowWrap: 'anywhere' }}>{t(palette.labelKey)}</span>
+            </label>
+          ))}
+          <label style={{ display: 'flex', flex: '1 1 auto', alignItems: 'center', gap: 10, minHeight: 56, padding: '8px 12px', border: `1px solid var(${customSelected ? '--md-sys-color-primary' : '--md-sys-color-outline-variant'})`, borderRadius: 'var(--md-sys-shape-corner-medium)', cursor: 'pointer', background: customSelected ? 'var(--md-sys-color-secondary-container)' : 'transparent' }}>
+            <MaterialInput type="radio" name="material-palette" value="custom" checked={customSelected} onChange={() => { setCustomDraft(customColor); setCustomError(false); setColorPalette(customColor); }} />
+            <span aria-hidden="true" style={{ width: 20, height: 20, flexShrink: 0, borderRadius: '50%', background: customColor }} />
+            <span style={{ overflowWrap: 'anywhere' }}>{t('material.palettes.custom')}</span>
+          </label>
+        </div>
+        {customSelected && <form noValidate onSubmit={event => {
+          event.preventDefault();
+          const color = normalizeSeedColor(customDraft);
+          setCustomError(!color);
+          if (color) setColorPalette(color);
+        }} style={{ display: 'grid', gridTemplateColumns: '72px minmax(0, 1fr)', gap: 12, marginTop: 16 }}>
+          <label style={{ display: 'grid', gap: 4, fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>
+            <span>{t('material.palettes.seedColor')}</span>
+            <MaterialInput type="color" value={customColor} onChange={event => setColorPalette(event.target.value)} style={{ width: 72 }} />
+          </label>
+          <label style={{ display: 'grid', gap: 4, minWidth: 0, fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>
+            <span>{t('material.palettes.hexValue')}</span>
+            <MaterialInput value={customDraft} onChange={event => { setCustomDraft(event.target.value); setCustomError(false); }}
+              aria-label={t('material.palettes.hexValue')}
+              maxLength={7} spellCheck={false} autoCapitalize="none" autoComplete="off" placeholder="#6750a4"
+              aria-invalid={customError || undefined} aria-describedby={customError ? customErrorId : customHintId} style={{ width: '100%', minWidth: 0 }} />
+          </label>
+          {customError && <p id={customErrorId} role="alert" style={{ gridColumn: '1 / -1', margin: 0, color: 'var(--md-sys-color-error)' }}>{t('material.palettes.invalidHex')}</p>}
+          <p id={customHintId} style={{ gridColumn: '1 / -1', margin: 0, fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--md-sys-color-on-surface-variant)' }}>{t('material.palettes.seedHint')}</p>
+          <MaterialButton type="submit" variant="filled" style={{ gridColumn: '1 / -1', justifySelf: 'start' }}>{t('compose.toolbar.apply')}</MaterialButton>
+        </form>}
+      </fieldset>
+
+      <p role="note" style={{ marginTop: 24, padding: 16, background: 'var(--md-sys-color-surface-container)', borderRadius: 'var(--md-sys-shape-corner-medium)', color: 'var(--md-sys-color-on-surface-variant)' }}>
+        {t('admin.appearance.materialCustomCssNote')}
+      </p>
+      <AppBrandingSettings />
+    </div>
+  );
+}
+
+// ─── Admin Panel Shell ────────────────────────────────────────────────────────
+function IconBtn({ children, onClick, title, danger, disabled }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <MaterialButton variant="icon" onClick={disabled ? undefined : onClick} title={title} disabled={disabled}
+      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{
+        background: hov && !disabled ? (danger ? 'rgba(248,113,113,0.1)' : 'var(--bg-hover)') : 'transparent',
+        border: `1px solid ${hov && !disabled ? (danger ? 'rgba(248,113,113,0.3)' : 'var(--border)') : 'transparent'}`,
+        borderRadius: 'var(--md-sys-shape-corner-small)', padding: '5px', color: danger && hov && !disabled ? 'var(--red)' : 'var(--text-tertiary)',
+        cursor: disabled ? 'default' : 'pointer', display: 'flex', alignItems: 'center', transition: 'all 0.1s',
+        opacity: disabled ? 0.4 : 1,
+      }}
+    >
+      {children}
+    </MaterialButton>
+  );
+}
+
+// ─── Fonts Tab ───────────────────────────────────────────────────────────────
+function FontsTab() {
+  const { t } = useTranslation();
+  const { fontSize, setFontSize } = useStore();
+
+  return (
+    <div>
+      <div style={{ marginBottom: 32 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)' }}>
+            {t('admin.appearance.fontSize')}
+          </div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--md-sys-color-primary)' }}>{fontSize}%</div>
+        </div>
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', marginBottom: 14 }}>
+          {t('admin.appearance.fontSizeDescription')}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', minWidth: 28 }}>80%</span>
+          <MaterialInput type="range" min={80} max={130} step={5} value={fontSize} aria-label={t('admin.appearance.fontSize')} onChange={e => setFontSize(parseInt(e.target.value))} style={{ flex: 1, accentColor: 'var(--md-sys-color-primary)', cursor: 'pointer' }} />
+          <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', minWidth: 32, textAlign: 'right' }}>130%</span>
+        </div>
+        {fontSize !== 100 && (
+          <MaterialButton variant="text" onClick={() => setFontSize(100)} style={{ marginTop: 8, fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+            {t('admin.appearance.fontSizeReset')}
+          </MaterialButton>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Layout Diagram ───────────────────────────────────────────────────────────
+function LayoutDiagram({ layoutConfig, active }) {
+  const isColumn = layoutConfig.direction === 'column';
+  const accent = active ? 'var(--accent)' : 'var(--border)';
+  const bg1 = active ? 'var(--accent-dim)' : 'var(--bg-elevated)';
+  const bg2 = active ? 'rgba(124,106,247,0.08)' : 'var(--bg-tertiary)';
+
+  // Sidebar width fraction (always ~15% of diagram)
+  const sw = 14;
+  // List width fraction: derived from listWidth relative to 340 baseline
+  const lw = isColumn ? 50 : Math.round(10 + (layoutConfig.listWidth / 460) * 32);
+  const rw = 72 - lw; // reading pane width
+
+  if (layoutConfig.listFirst) {
+    // List first (#596): sidebar left, the list across the rest, no reading pane.
+    return (
+      <svg width="80" height="52" viewBox="0 0 80 52" xmlns="http://www.w3.org/2000/svg">
+        <rect x="0.5" y="0.5" width="79" height="51" rx="4" fill="var(--bg-secondary)" stroke={accent} strokeWidth={active ? 1.5 : 1}/>
+        <rect x="1" y="1" width={sw} height="50" rx="3" fill={bg1}/>
+        <rect x={sw + 2} y="1" width={63} height="50" fill={bg2}/>
+        <line x1={sw + 1} y1="1" x2={sw + 1} y2="51" stroke={accent} strokeWidth="0.8"/>
+        <rect x="3" y="8" width={sw - 4} height="1.5" rx="0.75" fill={accent} opacity="0.5"/>
+        <rect x="3" y="13" width={sw - 6} height="1.5" rx="0.75" fill={accent} opacity="0.3"/>
+        <rect x="3" y="18" width={sw - 5} height="1.5" rx="0.75" fill={accent} opacity="0.3"/>
+        {[5, 15, 25, 35].map((y, i) => (
+          <g key={y}>
+            <rect x={sw + 4} y={y} width={40 - i * 4} height="1.5" rx="0.75" fill={accent} opacity={0.6 - i * 0.1}/>
+            <rect x={sw + 4} y={y + 4} width={55 - i * 3} height="1" rx="0.5" fill={accent} opacity="0.25"/>
+            <line x1={sw + 2} y1={y + 8} x2="79" y2={y + 8} stroke={accent} strokeWidth="0.5" opacity="0.3"/>
+          </g>
+        ))}
+      </svg>
+    );
+  }
+
+  if (isColumn) {
+    // Vertical split: sidebar left, right side has list on top + reading pane below
+    return (
+      <svg width="80" height="52" viewBox="0 0 80 52" xmlns="http://www.w3.org/2000/svg">
+        {/* Outer border */}
+        <rect x="0.5" y="0.5" width="79" height="51" rx="4" fill="var(--bg-secondary)" stroke={accent} strokeWidth={active ? 1.5 : 1}/>
+        {/* Sidebar */}
+        <rect x="1" y="1" width={sw} height="50" rx="3" fill={bg1}/>
+        {/* List (top half of content) */}
+        <rect x={sw + 2} y="1" width={72} height="24" fill={bg2}/>
+        {/* Reading pane (bottom half) */}
+        <rect x={sw + 2} y="27" width={72} height="24" fill="var(--bg-secondary)"/>
+        {/* Divider */}
+        <line x1={sw + 2} y1="26" x2="79" y2="26" stroke={accent} strokeWidth="0.8"/>
+        {/* Sidebar lines */}
+        <rect x="4" y="8" width={sw - 6} height="2" rx="1" fill={accent} opacity="0.5"/>
+        <rect x="4" y="14" width={sw - 8} height="2" rx="1" fill={accent} opacity="0.3"/>
+        <rect x="4" y="20" width={sw - 7} height="2" rx="1" fill={accent} opacity="0.3"/>
+        {/* List rows */}
+        <rect x={sw + 5} y="5" width="30" height="1.5" rx="0.75" fill={accent} opacity="0.5"/>
+        <rect x={sw + 5} y="9" width="45" height="1.5" rx="0.75" fill={accent} opacity="0.3"/>
+        <rect x={sw + 5} y="14" width="28" height="1.5" rx="0.75" fill={accent} opacity="0.4"/>
+        <rect x={sw + 5} y="18" width="40" height="1.5" rx="0.75" fill={accent} opacity="0.25"/>
+        {/* Reading pane lines */}
+        <rect x={sw + 5} y="31" width="40" height="2" rx="1" fill={accent} opacity="0.4"/>
+        <rect x={sw + 5} y="36" width="55" height="1.5" rx="0.75" fill={accent} opacity="0.2"/>
+        <rect x={sw + 5} y="40" width="50" height="1.5" rx="0.75" fill={accent} opacity="0.2"/>
+        <rect x={sw + 5} y="44" width="35" height="1.5" rx="0.75" fill={accent} opacity="0.15"/>
+      </svg>
+    );
+  }
+
+  return (
+    <svg width="80" height="52" viewBox="0 0 80 52" xmlns="http://www.w3.org/2000/svg">
+      {/* Outer border */}
+      <rect x="0.5" y="0.5" width="79" height="51" rx="4" fill="var(--bg-secondary)" stroke={accent} strokeWidth={active ? 1.5 : 1}/>
+      {/* Sidebar */}
+      <rect x="1" y="1" width={sw} height="50" rx="3" fill={bg1}/>
+      {/* Message list */}
+      <rect x={sw + 2} y="1" width={lw} height="50" fill={bg2}/>
+      {/* Reading pane */}
+      <rect x={sw + lw + 3} y="1" width={rw - 3} height="50" fill="var(--bg-secondary)"/>
+      {/* Dividers */}
+      <line x1={sw + 1} y1="1" x2={sw + 1} y2="51" stroke={accent} strokeWidth="0.8"/>
+      <line x1={sw + lw + 2} y1="1" x2={sw + lw + 2} y2="51" stroke={accent} strokeWidth="0.8"/>
+      {/* Sidebar lines */}
+      <rect x="3" y="8" width={sw - 4} height="1.5" rx="0.75" fill={accent} opacity="0.5"/>
+      <rect x="3" y="13" width={sw - 6} height="1.5" rx="0.75" fill={accent} opacity="0.3"/>
+      <rect x="3" y="18" width={sw - 5} height="1.5" rx="0.75" fill={accent} opacity="0.3"/>
+      <rect x="3" y="23" width={sw - 7} height="1.5" rx="0.75" fill={accent} opacity="0.2"/>
+      {/* List rows */}
+      <rect x={sw + 4} y="5" width={lw - 6} height="1.5" rx="0.75" fill={accent} opacity="0.6"/>
+      <rect x={sw + 4} y="9" width={lw - 4} height="1" rx="0.5" fill={accent} opacity="0.3"/>
+      <line x1={sw + 2} y1="13" x2={sw + lw + 1} y2="13" stroke={accent} strokeWidth="0.5" opacity="0.3"/>
+      <rect x={sw + 4} y="15" width={lw - 7} height="1.5" rx="0.75" fill={accent} opacity="0.5"/>
+      <rect x={sw + 4} y="19" width={lw - 4} height="1" rx="0.5" fill={accent} opacity="0.25"/>
+      <line x1={sw + 2} y1="23" x2={sw + lw + 1} y2="23" stroke={accent} strokeWidth="0.5" opacity="0.3"/>
+      <rect x={sw + 4} y="25" width={lw - 6} height="1.5" rx="0.75" fill={accent} opacity="0.45"/>
+      <rect x={sw + 4} y="29" width={lw - 5} height="1" rx="0.5" fill={accent} opacity="0.2"/>
+      {/* Reading pane content */}
+      <rect x={sw + lw + 5} y="7" width={rw - 10} height="2.5" rx="1" fill={accent} opacity="0.5"/>
+      <rect x={sw + lw + 5} y="13" width={rw - 8} height="1.5" rx="0.75" fill={accent} opacity="0.2"/>
+      <rect x={sw + lw + 5} y="17" width={rw - 12} height="1.5" rx="0.75" fill={accent} opacity="0.2"/>
+      <rect x={sw + lw + 5} y="21" width={rw - 9} height="1.5" rx="0.75" fill={accent} opacity="0.15"/>
+      <rect x={sw + lw + 5} y="25" width={rw - 14} height="1.5" rx="0.75" fill={accent} opacity="0.15"/>
+    </svg>
+  );
+}
+
+// ─── Layouts Tab ──────────────────────────────────────────────────────────────
+function SwipeActionIcon({ action, size = 17 }) {
+  if (action === 'star') return <MaterialIcon name="star" size={size} />;
+  if (action === 'delete') return <MaterialIcon name="delete" size={size} />;
+  if (action === 'markRead') return <MaterialIcon name="drafts" size={size} />;
+  if (action === 'reply') return <MaterialIcon name="reply" size={size} />;
+  if (action === 'replyAll') return <MaterialIcon name="reply_all" size={size} />;
+  if (action === 'disabled') return <MaterialIcon name="close" size={size} />;
+  return <MaterialIcon name="archive" size={size} />;
+}
+
+// ─── Shared setting controls ─────────────────────────────────────────────────
+// Layout and Behavior build every setting from these, so an option has one size and one look
+// wherever it appears.
+
+const choiceStyle = (active) => ({
+  background: active ? 'var(--bg-hover)' : 'var(--bg-tertiary)',
+  border: `2px solid ${active ? 'var(--accent)' : 'var(--border-subtle)'}`,
+  cursor: 'pointer', transition: 'all 0.15s', outline: 'none',
+});
+const CHIP_HEIGHT = 34;
+const selectStyle = {
+  height: CHIP_HEIGHT, padding: '0 10px', borderRadius: 8,
+  background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
+  color: 'var(--text-primary)', fontSize: 13, cursor: 'pointer', outline: 'none',
+};
+
+// A group of settings under a heading, set off from the group above it.
+function SettingGroup({ title, desc, first, children }) {
+  return (
+    <section style={first ? undefined : { marginTop: 28, paddingTop: 22, borderTop: '1px solid var(--border-subtle)' }}>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: desc ? 4 : 16 }}>{title}</div>
+      {desc && <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginBottom: 16 }}>{desc}</div>}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>{children}</div>
+    </section>
+  );
+}
+
+// One setting in a group: its name, an optional line under it, then its control.
+function SettingRow({ label, desc, children }) {
+  return (
+    <div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: desc ? 2 : 8 }}>{label}</div>
+      {desc && <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginBottom: 8 }}>{desc}</div>}
+      {children}
+    </div>
+  );
+}
+
+// Pick one of a few options, each with a line on what it does. Cards in a row share one height;
+// Descriptions stack on a phone so each option has enough readable line length.
+function ChoiceCards({ options, value, onChange }) {
+  const isMobile = useMobile();
+  const columns = isMobile ? 1 : options.length;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: 8 }}>
+      {options.map(({ id, label, desc }) => {
+        const active = value === id;
+        return (
+          <MaterialButton variant="card"
+            key={String(id)}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(id)}
+            style={{
+              ...choiceStyle(active), padding: '10px 12px', textAlign: 'left', borderRadius: 'var(--md-sys-shape-corner-small)',
+              display: 'flex', flexDirection: 'column', justifyContent: 'flex-start',
+            }}
+          >
+            <div style={{ fontSize: 'var(--md-sys-typescale-title-small-size)', fontWeight: 500, color: 'var(--text-primary)', marginBottom: 2 }}>{label}</div>
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', lineHeight: 1.5 }}>{desc}</div>
+          </MaterialButton>
+        );
+      })}
+    </div>
+  );
+}
+
+// Chips wrap before their labels become cramped. Short option sets share the available width.
+function ChoiceChips({ options, isActive, onSelect, wrap = false }) {
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {options.map(({ value, label }) => {
+        const active = isActive(value);
+        return (
+          <MaterialButton variant="chip" className="md-choice-chip"
+            key={String(value)}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onSelect(value)}
+            style={{
+              ...choiceStyle(active), height: CHIP_HEIGHT, padding: '0 12px', borderRadius: 'var(--md-sys-shape-corner-small)',
+              fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, whiteSpace: 'nowrap',
+              flex: wrap ? '0 1 auto' : '1 1 auto',
+              color: active ? 'var(--accent)' : 'var(--text-secondary)',
+            }}
+          >
+            {label}
+          </MaterialButton>
+        );
+      })}
+    </div>
+  );
+}
+
+// An on/off setting: its name and what it does, with a switch on the right.
+function ToggleRow({ label, desc, checked, onChange, disabled = false }) {
+  const descriptionId = useId();
+  return (
+    <div className="admin-toggle-row" style={{
+      padding: '10px 12px', borderRadius: 'var(--md-sys-shape-corner-small)',
+      background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
+    }}>
+      <div className="admin-toggle-copy" style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 'var(--md-sys-typescale-title-small-size)', fontWeight: 500, color: 'var(--text-primary)' }}>{label}</div>
+        {desc && <div id={descriptionId} style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', marginTop: 2, lineHeight: 1.5 }}>{desc}</div>}
+      </div>
+      <MaterialButton variant="switch" selected={checked}
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        aria-describedby={desc ? descriptionId : undefined}
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        style={{
+          width: 44, height: 24, borderRadius: 'var(--md-sys-shape-corner-medium)',
+          background: checked ? 'var(--accent)' : 'var(--bg-elevated)',
+          border: `1px solid ${checked ? 'var(--accent)' : 'var(--border)'}`,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          position: 'relative', transition: 'all 0.2s', flexShrink: 0,
+          opacity: disabled ? 0.6 : 1,
+        }}
+      >
+        <span style={{
+          position: 'absolute', top: 3, left: checked ? 22 : 3,
+          width: 16, height: 16, borderRadius: '50%', background: 'white',
+          transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+        }} />
+      </MaterialButton>
+    </div>
+  );
+}
+
+// ─── Appearance › Layout ─────────────────────────────────────────────────────
+// How things look: the pane arrangement and what the message list shows. How MailFlow acts
+// (reading, writing, sync) is under Behavior.
+function LayoutsTab() {
+  const { t } = useTranslation();
+  const isMobile = useMobile();
+  const { layout, setLayout, pageSize, setPageSize, scrollMode, setScrollMode, conversationMode, setConversationMode, hoverQuickActions, setHoverQuickActions, hoverActionSet, setHoverActionSet, showMobileAvatars, setShowMobileAvatars, gravatarAvatars, setGravatarAvatars, senderFavicons, senderFaviconsSaving, setSenderFavicons, showMessagePreviews, setShowMessagePreviews } = useStore();
+  const [senderFaviconsError, setSenderFaviconsError] = useState('');
+
+  const handleSelect = (key) => {
+    setLayout(key);
+    applyLayout(key);
+  };
+
+  return (
+    <div>
+      <SettingGroup first title={t('admin.appearance.layout')} desc={t('admin.appearance.layoutDescription')}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 220px), 1fr))', gap: 10 }}>
+          {Object.entries(LAYOUTS).map(([key, l]) => {
+            const isActive = layout === key;
+            return (
+              <MaterialButton variant="card"
+                key={key}
+                type="button"
+                aria-pressed={isActive}
+                onClick={() => handleSelect(key)}
+                style={{
+                  ...choiceStyle(isActive), borderRadius: 'var(--md-sys-shape-corner-medium)', padding: '14px',
+                  textAlign: 'left', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 14,
+                }}
+              >
+                <div style={{ flexShrink: 0 }}>
+                  <LayoutDiagram layoutKey={key} layoutConfig={l} active={isActive} />
+                </div>
+
+                <div style={{ flex: '1 1 180px', minWidth: 0 }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                  }}>
+                    <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)' }}>
+                      {t(l.labelKey, l.label)}
+                    </div>
+                    {isActive && (
+                      <MaterialIcon name="check_circle" />
+                    )}
+                  </div>
+                  <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 4, lineHeight: 1.4 }}>
+                    {t(l.descriptionKey, l.description)}
+                  </div>
+                </div>
+              </MaterialButton>
+            );
+          })}
+        </div>
+      </SettingGroup>
+
+      <SettingGroup title={t('admin.messageList.title')}>
+        <SettingRow label={t('admin.messageList.threadingMode')}>
+          <ChoiceCards value={conversationMode} onChange={setConversationMode} options={[
+            { id: 'off',  label: t('admin.messageList.threadingOff'),  desc: t('admin.messageList.threadingOffDesc') },
+            { id: 'list', label: t('admin.messageList.threadingOn'),   desc: t('admin.messageList.threadingOnDesc') },
+            { id: 'pane', label: t('admin.messageList.threadingPane'), desc: t('admin.messageList.threadingPaneDesc') },
+          ]} />
+        </SettingRow>
+
+        <SettingRow label={t('admin.messageList.showMessagePreviews')}>
+          <ChoiceCards value={showMessagePreviews} onChange={setShowMessagePreviews} options={[
+            { id: false, label: t('admin.messageList.previewOff'), desc: t('admin.messageList.previewOffDesc') },
+            { id: true,  label: t('admin.messageList.previewOn'),  desc: t('admin.messageList.previewOnDesc') },
+          ]} />
+        </SettingRow>
+
+        <SettingRow label={t('admin.messageList.gravatarMode')}>
+          <ChoiceCards value={gravatarAvatars} onChange={setGravatarAvatars} options={[
+            { id: false, label: t('admin.messageList.gravatarOff'), desc: t('admin.messageList.gravatarOffDesc') },
+            { id: true,  label: t('admin.messageList.gravatarOn'),  desc: t('admin.messageList.gravatarOnDesc') },
+          ]} />
+        </SettingRow>
+
+        {isMobile && (
+          <SettingRow label={t('admin.messageList.mobileAvatarsMode')}>
+            <ChoiceCards value={showMobileAvatars} onChange={setShowMobileAvatars} options={[
+              { id: false, label: t('admin.messageList.mobileAvatarsOff'), desc: t('admin.messageList.mobileAvatarsOffDesc') },
+              { id: true,  label: t('admin.messageList.mobileAvatarsOn'),  desc: t('admin.messageList.mobileAvatarsOnDesc') },
+            ]} />
+          </SettingRow>
+        )}
+
+        <div>
+          <ToggleRow
+            label={t('admin.messageList.senderFavicons')}
+            desc={t('admin.messageList.senderFaviconsDesc')}
+            checked={senderFavicons}
+            disabled={senderFaviconsSaving}
+            onChange={async (next) => {
+              setSenderFaviconsError('');
+              try { await setSenderFavicons(next); }
+              catch { setSenderFaviconsError(t('admin.messageList.senderFaviconsSaveError')); }
+            }}
+          />
+          {senderFaviconsError && (
+            <div style={{ color: 'var(--red)', fontSize: 'var(--md-sys-typescale-body-small-size)', marginTop: 8 }}>
+              {senderFaviconsError}
+            </div>
+          )}
+        </div>
+
+        {/* A phone has no pointer to hover with. */}
+        {!isMobile && (
+          <SettingRow label={t('admin.messageList.hoverQuickActionsMode')}>
+            <ChoiceCards value={hoverQuickActions} onChange={setHoverQuickActions} options={[
+              { id: false, label: t('admin.messageList.hoverQuickActionsOff'), desc: t('admin.messageList.hoverQuickActionsOffDesc') },
+              { id: true,  label: t('admin.messageList.hoverQuickActionsOn'),  desc: t('admin.messageList.hoverQuickActionsOnDesc') },
+            ]} />
+            {/* #440: which actions the cluster shows. Membership only — order stays canonical. */}
+            {hoverQuickActions && (
+              <div style={{ marginTop: 10 }}>
+                <ChoiceChips
+                  wrap
+                  isActive={id => hoverActionSet.includes(id)}
+                  onSelect={id => setHoverActionSet(hoverActionSet.includes(id) ? hoverActionSet.filter(k => k !== id) : [...hoverActionSet, id])}
+                  options={[
+                    { value: 'markRead', label: t('admin.messageList.swipeMarkRead') },
+                    { value: 'star', label: t('admin.messageList.swipeStar') },
+                    { value: 'archive', label: t('admin.messageList.swipeArchive') },
+                    { value: 'snooze', label: t('contextMenu.snooze.label') },
+                    { value: 'delete', label: t('admin.messageList.swipeDelete') },
+                    { value: 'move', label: t('contextMenu.moveToFolder') },
+                  ]}
+                />
+              </div>
+            )}
+          </SettingRow>
+        )}
+
+        <SettingRow label={t('admin.messageList.scrollingMode')}>
+          <ChoiceCards value={scrollMode} onChange={setScrollMode} options={[
+            { id: 'infinite',  label: t('admin.messageList.infiniteScroll'), desc: t('admin.messageList.infiniteScrollDesc') },
+            { id: 'paginated', label: t('admin.messageList.paginated'),      desc: t('admin.messageList.paginatedDesc') },
+          ]} />
+        </SettingRow>
+
+        <SettingRow label={scrollMode === 'paginated' ? t('admin.messageList.perPagePaginated') : t('admin.messageList.perPageInfinite')}>
+          <ChoiceChips
+            isActive={n => pageSize === n}
+            onSelect={setPageSize}
+            options={[25, 50, 100, 200].map(n => ({ value: n, label: String(n) }))}
+          />
+        </SettingRow>
+      </SettingGroup>
+    </div>
+  );
+}
+
+// ─── Behavior ────────────────────────────────────────────────────────────────
+// How MailFlow acts: reading, writing, syncing, and opening mailto: links.
+function BehaviorTab() {
+  const { t } = useTranslation();
+  const isMobile = useMobile();
+  const { swipeActions, setSwipeAction, syncInterval, setSyncInterval, folderSyncInterval, setFolderSyncInterval, autoOpenReplyDrafts, setAutoOpenReplyDrafts, plaintextEmail, setPlaintextEmail, replyDefault, setReplyDefault, afterRemove, setAfterRemove, markReadBehavior, setMarkReadBehavior, markReadDelay, setMarkReadDelay, accounts, defaultSender, setDefaultSender } = useStore();
+
+  // "Set MailFlow as your default email app": registerProtocolHandler is the
+  // cross-browser path (works in Firefox and non-installed Chromium) and must be
+  // called from a user gesture, so it lives behind this button. Feature-detected in
+  // the JSX; not available on iOS/Safari.
+  const [mailtoStatus, setMailtoStatus] = useState(null);
+  const registerMailtoHandler = () => {
+    try {
+      navigator.registerProtocolHandler('mailto', window.location.origin + '/?mailto=%s');
+      setMailtoStatus('ok');
+    } catch (e) {
+      console.error('registerProtocolHandler failed:', e.message);
+      setMailtoStatus('error');
+    }
+  };
+
+  const swipeOptions = [
+    { id: 'star', label: t('admin.messageList.swipeStar'), desc: t('admin.messageList.swipeStarDesc') },
+    { id: 'archive', label: t('admin.messageList.swipeArchive'), desc: t('admin.messageList.swipeArchiveDesc') },
+    { id: 'delete', label: t('admin.messageList.swipeDelete'), desc: t('admin.messageList.swipeDeleteDesc') },
+    { id: 'markRead', label: t('admin.messageList.swipeMarkRead'), desc: t('admin.messageList.swipeMarkReadDesc') },
+    { id: 'reply', label: t('admin.messageList.swipeReply'), desc: t('admin.messageList.swipeReplyDesc') },
+    { id: 'replyAll', label: t('admin.messageList.swipeReplyAll'), desc: t('admin.messageList.swipeReplyAllDesc') },
+    { id: 'disabled', label: t('admin.messageList.swipeDisabled'), desc: t('admin.messageList.swipeDisabledDesc') },
+  ];
+
+  const renderSwipePicker = (direction, title) => (
+    <div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginBottom: 6 }}>{title}</div>
+      <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--md-sys-shape-corner-small)', overflow: 'hidden' }}>
+        {swipeOptions.map((option, i) => {
+          const active = (swipeActions?.[direction] || (direction === 'left' ? 'archive' : 'markRead')) === option.id;
+          return (
+            <MaterialButton variant="text"
+              key={option.id}
+              type="button"
+              aria-pressed={active}
+              onClick={() => setSwipeAction(direction, option.id)}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+                padding: '11px 12px', border: 'none',
+                borderBottom: i < swipeOptions.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+                background: active ? 'var(--bg-hover)' : 'var(--bg-tertiary)',
+                color: 'var(--text-primary)', cursor: 'pointer', textAlign: 'left',
+              }}
+            >
+              <span style={{ color: active ? 'var(--accent)' : 'var(--text-tertiary)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                <SwipeActionIcon action={option.id} />
+              </span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: 'block', fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 500 }}>{option.label}</span>
+                <span style={{ display: 'block', fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>{option.desc}</span>
+              </span>
+              {active && (
+                <MaterialIcon name="check" />
+              )}
+            </MaterialButton>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <SettingGroup first title={t('admin.behavior.reading')}>
+        <SettingRow label={t('admin.messageList.markReadBehavior')}>
+          <ChoiceCards value={markReadBehavior} onChange={setMarkReadBehavior} options={[
+            { id: 'immediate', label: t('admin.messageList.markReadImmediate'), desc: t('admin.messageList.markReadImmediateDesc') },
+            { id: 'delay',     label: t('admin.messageList.markReadDelay'),     desc: t('admin.messageList.markReadDelayDesc') },
+            { id: 'manual',    label: t('admin.messageList.markReadManual'),    desc: t('admin.messageList.markReadManualDesc') },
+          ]} />
+          {markReadBehavior === 'delay' && (
+            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)' }}>{t('admin.messageList.markReadDelayLabel')}</span>
+              <MaterialSelect
+                value={markReadDelay}
+                onChange={e => setMarkReadDelay(parseInt(e.target.value))}
+                style={selectStyle}
+              >
+                {[1,2,3,5,10].map(s => (
+                  <option key={s} value={s}>{t('admin.messageList.markReadDelaySeconds', { count: s })}</option>
+                ))}
+              </MaterialSelect>
+            </div>
+          )}
+        </SettingRow>
+
+        {/* What opens after the open message is deleted, archived or moved (#572) */}
+        <SettingRow label={t('admin.messageList.afterRemove')}>
+          <ChoiceCards value={afterRemove} onChange={setAfterRemove} options={[
+            { id: 'next',     label: t('admin.messageList.afterRemoveNext'),     desc: t('admin.messageList.afterRemoveNextDesc') },
+            { id: 'previous', label: t('admin.messageList.afterRemovePrevious'), desc: t('admin.messageList.afterRemovePreviousDesc') },
+            { id: 'list',     label: t('admin.messageList.afterRemoveList'),     desc: t('admin.messageList.afterRemoveListDesc') },
+          ]} />
+          <div style={{ marginTop: 8, fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)' }}>{t('admin.messageList.afterRemoveMobile')}</div>
+        </SettingRow>
+
+        {isMobile && (
+          <SettingRow label={t('admin.messageList.swipeActions')}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 14 }}>
+              {renderSwipePicker('left', t('admin.messageList.swipeLeft'))}
+              {renderSwipePicker('right', t('admin.messageList.swipeRight'))}
+            </div>
+          </SettingRow>
+        )}
+      </SettingGroup>
+
+      <SettingGroup title={t('admin.behavior.writing')}>
+        <SettingRow label={t('admin.messageList.defaultReplyAction')}>
+          <ChoiceCards value={replyDefault} onChange={setReplyDefault} options={[
+            { id: 'reply',    label: t('admin.messageList.defaultReply'),    desc: t('admin.messageList.defaultReplyDesc') },
+            { id: 'replyAll', label: t('admin.messageList.defaultReplyAll'), desc: t('admin.messageList.defaultReplyAllDesc') },
+          ]} />
+        </SettingRow>
+
+        <SettingRow label={t('admin.messageList.composeFormat')}>
+          <ChoiceCards value={plaintextEmail} onChange={setPlaintextEmail} options={[
+            { id: false, label: t('admin.messageList.composeRichText'),  desc: t('admin.messageList.composeRichTextDesc') },
+            { id: true,  label: t('admin.messageList.composePlainText'), desc: t('admin.messageList.composePlainTextDesc') },
+          ]} />
+        </SettingRow>
+
+        {/* Default sender (#417) */}
+        <SettingRow label={t('admin.messageList.defaultSender')} desc={t('admin.messageList.defaultSenderDesc')}>
+          <MaterialSelect aria-label={t('admin.messageList.defaultSender')}
+            // A default can outlive the account or alias it names. Showing '' rather than an
+            // unmatched value keeps the control honest: it reflects what the composer will
+            // actually do, which is fall back to last-used.
+            value={isValidFromValue(defaultSender, accounts) ? defaultSender : ''}
+            onChange={e => setDefaultSender(e.target.value)}
+            style={{ ...selectStyle, width: '100%', maxWidth: 420 }}
+          >
+            <option value="">{t('admin.messageList.defaultSenderLastUsed')}</option>
+            {accounts.map(acc => [
+              <option key={acc.id} value={`account:${acc.id}`}>
+                {acc.sender_name ? `${acc.sender_name} <${acc.email_address}>` : acc.email_address}
+              </option>,
+              ...(acc.aliases || []).map(al => (
+                <option key={al.id} value={`alias:${al.id}:${acc.id}`}>
+                  {`\u00a0\u00a0${al.name ? `${al.name} <${al.email}>` : al.email}`}
+                </option>
+              )),
+            ])}
+          </MaterialSelect>
+        </SettingRow>
+
+        <ToggleRow
+          label={t('admin.messageList.autoOpenReplyDrafts', 'Automatically open saved replies when selecting inbox messages')}
+          checked={autoOpenReplyDrafts}
+          onChange={setAutoOpenReplyDrafts}
+        />
+      </SettingGroup>
+
+      <SettingGroup title={t('admin.behavior.sync')}>
+        <SettingRow label={t('admin.messageList.syncFrequency')} desc={t('admin.messageList.syncFrequencyDesc')}>
+          <ChoiceChips
+            isActive={v => syncInterval === v}
+            onSelect={setSyncInterval}
+            options={[
+              { value: 15,  label: '15s' },
+              { value: 30,  label: '30s' },
+              { value: 60,  label: '60s' },
+              { value: 120, label: '2 min' },
+            ]}
+          />
+        </SettingRow>
+
+        <SettingRow label={t('admin.messageList.folderSyncFrequency')} desc={t('admin.messageList.folderSyncFrequencyDesc')}>
+          <ChoiceChips
+            isActive={v => folderSyncInterval === v}
+            onSelect={setFolderSyncInterval}
+            options={[
+              { value: 900,  label: '15 min' },
+              { value: 1800, label: '30 min' },
+              { value: 3600, label: '1 hour' },
+              { value: 0,    label: t('common.never') },
+            ]}
+          />
+        </SettingRow>
+      </SettingGroup>
+
+      {typeof navigator !== 'undefined' && 'registerProtocolHandler' in navigator && (
+        <SettingGroup title={t('admin.messageList.defaultMailApp')} desc={t('admin.messageList.defaultMailAppDesc')}>
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <MaterialButton variant="filled"
+              type="button"
+              onClick={registerMailtoHandler}
+              style={{
+                height: CHIP_HEIGHT, padding: '0 14px', background: 'var(--accent)', color: 'var(--accent-text)',
+                border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)', cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
+              }}
+            >
+              {t('admin.messageList.defaultMailAppBtn')}
+            </MaterialButton>
+            {mailtoStatus === 'ok' && (
+              <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)' }}>
+                {t('admin.messageList.defaultMailAppOk')}
+              </span>
+            )}
+            {mailtoStatus === 'error' && (
+              <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--red)' }}>
+                {t('admin.messageList.defaultMailAppError')}
+              </span>
+            )}
+          </div>
+        </SettingGroup>
+      )}
+    </div>
+  );
+}
+
+// ─── Integrations Tab ────────────────────────────────────────────────────────
+// CardDAV contact sync (e.g. Nextcloud). One-way, read-only pull.
+function CardDavCard() {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState(null); // null while loading
+  const [expanded, setExpanded] = useState(false);
+  const [form, setForm] = useState({ serverUrl: '', username: '', password: '', dupMode: 'separate', intervalMin: 60 });
+  const [connecting, setConnecting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => { api.carddav.status().then(setStatus).catch(() => setStatus({ connected: false })); }, []);
+
+  const connected = status?.connected;
+  const loading = status === null;
+
+  const handleConnect = async () => {
+    setConnecting(true); setError('');
+    try {
+      const s = await api.carddav.connect({
+        serverUrl: form.serverUrl.trim(), username: form.username.trim(),
+        password: form.password, dupMode: form.dupMode, intervalMin: Number(form.intervalMin),
+      });
+      setStatus(s); setForm(f => ({ ...f, password: '' }));
+    } catch (e) { setError(e.message || t('admin.integrations.carddav.connectFailed')); }
+    finally { setConnecting(false); }
+  };
+  const handleSync = async () => {
+    setSyncing(true); setError('');
+    try { const r = await api.carddav.sync(); setStatus(r.status); if (!r.ok && r.error) setError(r.error); }
+    catch (e) { setError(e.message); }
+    finally { setSyncing(false); }
+  };
+  const handleDisconnect = async () => {
+    setDisconnecting(true); setError('');
+    try { await api.carddav.disconnect(); setStatus({ connected: false }); }
+    catch (e) { setError(e.message); }
+    finally { setDisconnecting(false); }
+  };
+  const updateSetting = async (patch) => {
+    setStatus(s => ({ ...s, ...patch }));
+    try { await api.carddav.update(patch); } catch (e) { setError(e.message); }
+  };
+
+  const inputStyle = { padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 13, outline: 'none', width: '100%', boxSizing: 'border-box' };
+  const labelStyle = { fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)', display: 'block', marginBottom: 5 };
+  const errBox = error && (
+    <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--red, #f87171)', padding: '8px 10px', borderRadius: 'var(--md-sys-shape-corner-small)', background: 'rgba(248,113,113,0.08)' }}>{error}</div>
+  );
+
+  return (
+    <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--md-sys-shape-corner-medium)', overflow: 'hidden', marginBottom: 12 }}>
+      <div data-md-state=""
+        onClick={() => setExpanded(!expanded)}
+        style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', background: 'var(--bg-tertiary)' }}
+        
+        
+      >
+        <MaterialIcon name="person" />
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)' }}>{t('admin.integrations.carddav.title')}</span>
+            <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', padding: '2px 8px', borderRadius: 'var(--md-sys-shape-corner-medium)', background: (!loading && connected) ? 'rgba(34,197,94,0.1)' : 'var(--bg-primary)', color: (!loading && connected) ? 'var(--green)' : 'var(--text-tertiary)', border: `1px solid ${(!loading && connected) ? 'var(--green)' : 'var(--border)'}` }}>
+              {loading ? '...' : (connected ? t('admin.integrations.carddav.connected') : t('admin.integrations.carddav.notConnected'))}
+            </span>
+          </div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>{t('admin.integrations.carddav.description')}</div>
+        </div>
+        <MaterialIcon name="expand_more" />
+      </div>
+
+      {expanded && (
+        <div style={{ padding: '16px 18px', borderTop: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {loading ? (
+            <div style={{ color: 'var(--text-tertiary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>{t('admin.integrations.loading')}</div>
+          ) : connected ? (
+            <>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>
+                <div><strong style={{ color: 'var(--text-primary)' }}>{status.username}</strong> @ {status.serverUrl}</div>
+                <div style={{ marginTop: 4 }}>
+                  {t('admin.integrations.carddav.summary', { contacts: status.contactCount ?? 0, books: status.bookCount ?? 0 })}
+                  {' · '}
+                  {t('admin.integrations.carddav.lastSync', { when: status.lastSyncAt ? formatDateTime(status.lastSyncAt) : t('common.never') })}
+                </div>
+                {status.lastError && (
+                  <div style={{ marginTop: 4, color: 'var(--red, #f87171)' }}>{t('admin.integrations.carddav.syncFailed', { error: status.lastError })}</div>
+                )}
+              </div>
+
+              <div>
+                <label style={labelStyle}>{t('admin.integrations.carddav.dupLabel')}</label>
+                <MaterialSelect aria-label={t('admin.integrations.carddav.dupLabel')} value={status.dupMode || 'separate'} onChange={e => updateSetting({ dupMode: e.target.value })} style={{ ...inputStyle, cursor: 'pointer' }}>
+                  <option value="separate">{t('admin.integrations.carddav.dupSeparate')}</option>
+                  <option value="merge">{t('admin.integrations.carddav.dupMerge')}</option>
+                  <option value="skip">{t('admin.integrations.carddav.dupSkip')}</option>
+                </MaterialSelect>
+              </div>
+              <div>
+                <label style={labelStyle}>{t('admin.integrations.carddav.intervalLabel')}</label>
+                <MaterialInput aria-label={t('admin.integrations.carddav.intervalLabel')} type="number" min="15" max="1440" value={status.intervalMin || 60}
+                  onChange={e => setStatus(s => ({ ...s, intervalMin: e.target.value }))}
+                  onBlur={e => updateSetting({ intervalMin: Number(e.target.value) })} style={inputStyle} />
+              </div>
+              {errBox}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <MaterialButton variant="filled" onClick={handleSync} disabled={syncing} style={{ padding: '6px 14px', borderRadius: 'var(--md-sys-shape-corner-small)', cursor: syncing ? 'default' : 'pointer', border: 'none', background: 'var(--accent)', color: 'var(--accent-text)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, opacity: syncing ? 0.7 : 1 }}>
+                  {syncing ? t('admin.integrations.carddav.syncing') : t('admin.integrations.carddav.syncNow')}
+                </MaterialButton>
+                <MaterialButton variant="outlined" onClick={handleDisconnect} disabled={disconnecting} style={{ padding: '6px 14px', borderRadius: 'var(--md-sys-shape-corner-small)', cursor: disconnecting ? 'default' : 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: 'var(--md-sys-typescale-body-medium-size)', opacity: disconnecting ? 0.6 : 1 }}>
+                  {disconnecting ? t('common.loading') : t('admin.integrations.carddav.disconnect')}
+                </MaterialButton>
+              </div>
+            </>
+          ) : (
+            <>
+              <div><label style={labelStyle}>{t('admin.integrations.carddav.serverLabel')}</label>
+                <MaterialInput aria-label={t('admin.integrations.carddav.serverLabel')} type="text" value={form.serverUrl} onChange={e => setForm(f => ({ ...f, serverUrl: e.target.value }))} placeholder={t('admin.integrations.carddav.serverPh')} style={inputStyle} /></div>
+              <div><label style={labelStyle}>{t('admin.integrations.carddav.userLabel')}</label>
+                <MaterialInput aria-label={t('admin.integrations.carddav.userLabel')} type="text" value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value }))} placeholder={t('admin.integrations.carddav.userPh')} style={inputStyle} /></div>
+              <div><label style={labelStyle}>{t('admin.integrations.carddav.passLabel')}</label>
+                <MaterialInput aria-label={t('admin.integrations.carddav.passLabel')} type="password" autoComplete="new-password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder={t('admin.integrations.carddav.passPh')} style={inputStyle} /></div>
+              <div><label style={labelStyle}>{t('admin.integrations.carddav.dupLabel')}</label>
+                <MaterialSelect aria-label={t('admin.integrations.carddav.dupLabel')} value={form.dupMode} onChange={e => setForm(f => ({ ...f, dupMode: e.target.value }))} style={{ ...inputStyle, cursor: 'pointer' }}>
+                  <option value="separate">{t('admin.integrations.carddav.dupSeparate')}</option>
+                  <option value="merge">{t('admin.integrations.carddav.dupMerge')}</option>
+                  <option value="skip">{t('admin.integrations.carddav.dupSkip')}</option>
+                </MaterialSelect></div>
+              {errBox}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <MaterialButton variant="filled" onClick={handleConnect} disabled={connecting || !form.serverUrl.trim() || !form.username.trim() || !form.password}
+                  style={{ padding: '6px 14px', borderRadius: 'var(--md-sys-shape-corner-small)', cursor: (connecting || !form.serverUrl.trim() || !form.username.trim() || !form.password) ? 'default' : 'pointer', border: 'none', background: 'var(--accent)', color: 'var(--accent-text)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, opacity: (connecting || !form.serverUrl.trim() || !form.username.trim() || !form.password) ? 0.7 : 1 }}>
+                  {connecting ? t('admin.integrations.carddav.connecting') : t('admin.integrations.carddav.connect')}
+                </MaterialButton>
+              </div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', lineHeight: 1.5 }}>{t('admin.integrations.carddav.help')}</div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IntegrationsTab() {
+  const { t } = useTranslation();
+  const { setTodoistConnected } = useStore();
+
+  // Todoist state
+  const [tdConnected, setTdConnected] = useState(false);
+  const [tdLoading, setTdLoading] = useState(true);
+  const [tdExpanded, setTdExpanded] = useState(false);
+  const [tdToken, setTdToken] = useState('');
+  const [tdConnecting, setTdConnecting] = useState(false);
+  const [tdDisconnecting, setTdDisconnecting] = useState(false);
+  const [tdError, setTdError] = useState('');
+
+  useEffect(() => {
+    api.todoist.status()
+      .then(({ connected }) => {
+        setTdConnected(connected);
+        setTodoistConnected(connected);
+        if (connected) setTdExpanded(true);
+      })
+      .catch(console.error)
+      .finally(() => setTdLoading(false));
+  }, [setTodoistConnected]);
+
+  const handleTdConnect = async () => {
+    const trimmed = tdToken.trim();
+    if (!trimmed) return;
+    setTdConnecting(true);
+    setTdError('');
+    try {
+      await api.todoist.connect(trimmed);
+      setTdConnected(true);
+      setTodoistConnected(true);
+      setTdToken('');
+    } catch (err) {
+      setTdError(err.message);
+    } finally {
+      setTdConnecting(false);
+    }
+  };
+
+  const handleTdDisconnect = async () => {
+    setTdDisconnecting(true);
+    setTdError('');
+    try {
+      await api.todoist.disconnect();
+      setTdConnected(false);
+      setTodoistConnected(false);
+    } catch (err) {
+      setTdError(err.message);
+    } finally {
+      setTdDisconnecting(false);
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 20 }}>
+        {t('admin.integrations.title')}
+      </div>
+      <div>
+          {/* Todoist */}
+          <div style={{
+            border: '1px solid var(--border-subtle)', borderRadius: 'var(--md-sys-shape-corner-medium)',
+            overflow: 'hidden', marginBottom: 12,
+          }}>
+            {/* Header */}
+            <div data-md-state=""
+              onClick={() => setTdExpanded(!tdExpanded)}
+              style={{
+                padding: '14px 16px', display: 'flex', alignItems: 'center',
+                gap: 12, cursor: 'pointer', background: 'var(--bg-tertiary)',
+                transition: 'background 0.1s',
+              }}
+              
+              
+            >
+              <MaterialIcon name="check_circle" />
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)' }}>
+                    {t('admin.integrations.todoist.title')}
+                  </span>
+                  <span style={{
+                    fontSize: 'var(--md-sys-typescale-body-small-size)', padding: '2px 8px', borderRadius: 'var(--md-sys-shape-corner-medium)',
+                    background: (!tdLoading && tdConnected) ? 'rgba(34,197,94,0.1)' : 'var(--bg-primary)',
+                    color: (!tdLoading && tdConnected) ? 'var(--green)' : 'var(--text-tertiary)',
+                    border: `1px solid ${(!tdLoading && tdConnected) ? 'var(--green)' : 'var(--border)'}`,
+                  }}>
+                    {tdLoading ? '...' : (tdConnected ? t('admin.integrations.todoist.connected') : t('admin.integrations.todoist.notConnected'))}
+                  </span>
+                </div>
+                <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                  {t('admin.integrations.todoist.description')}
+                </div>
+              </div>
+              <MaterialIcon name="expand_more" />
+            </div>
+
+            {tdExpanded && (
+              <div style={{ padding: '16px 18px', borderTop: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {tdLoading ? (
+                  <div style={{ color: 'var(--text-tertiary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>{t('admin.integrations.loading')}</div>
+                ) : tdConnected ? (
+                  <>
+                    {tdError && (
+                      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--red, #f87171)', padding: '8px 10px', borderRadius: 'var(--md-sys-shape-corner-small)', background: 'rgba(248,113,113,0.08)' }}>
+                        {tdError}
+                      </div>
+                    )}
+                    <div>
+                      <MaterialButton variant="outlined"
+                        onClick={handleTdDisconnect}
+                        disabled={tdDisconnecting}
+                        style={{
+                          padding: '6px 14px', borderRadius: 'var(--md-sys-shape-corner-small)', cursor: tdDisconnecting ? 'default' : 'pointer',
+                          border: '1px solid var(--border)', background: 'transparent',
+                          color: 'var(--text-secondary)', fontSize: 'var(--md-sys-typescale-body-medium-size)', opacity: tdDisconnecting ? 0.6 : 1,
+                        }}
+                      >
+                        {tdDisconnecting ? t('common.loading') : t('admin.integrations.todoist.disconnect')}
+                      </MaterialButton>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <label style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 500, color: 'var(--text-secondary)', display: 'block', marginBottom: 5 }}>
+                        {t('admin.integrations.todoist.tokenLabel')}
+                      </label>
+                      <MaterialInput aria-label={t('admin.integrations.todoist.tokenLabel')}
+                        type="password"
+                        // Suppress browser/password-manager autofill: without this, a lone
+                        // password field makes Chrome autofill the saved login email into
+                        // the nearest text field — the settings search box — which flips the
+                        // panel to search results and hides this form. Fixes #225.
+                        autoComplete="new-password"
+                        value={tdToken}
+                        onChange={e => setTdToken(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && !tdConnecting && tdToken.trim() && handleTdConnect()}
+                        placeholder={t('admin.integrations.todoist.tokenPh')}
+                        style={{
+                          padding: '8px 10px', borderRadius: 'var(--md-sys-shape-corner-small)', border: '1px solid var(--border)',
+                          background: 'var(--bg-primary)', color: 'var(--text-primary)',
+                          fontSize: 'var(--md-sys-typescale-body-medium-size)', outline: 'none', width: '100%', boxSizing: 'border-box',
+                        }}
+                      />
+                    </div>
+                    {tdError && (
+                      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--red, #f87171)', padding: '8px 10px', borderRadius: 'var(--md-sys-shape-corner-small)', background: 'rgba(248,113,113,0.08)' }}>
+                        {tdError}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <MaterialButton variant="filled"
+                        onClick={handleTdConnect}
+                        disabled={tdConnecting || !tdToken.trim()}
+                        style={{
+                          padding: '6px 14px', borderRadius: 'var(--md-sys-shape-corner-small)',
+                          cursor: (tdConnecting || !tdToken.trim()) ? 'default' : 'pointer',
+                          border: 'none', background: 'var(--accent)', color: 'var(--accent-text)',
+                          fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, opacity: (tdConnecting || !tdToken.trim()) ? 0.7 : 1,
+                        }}
+                      >
+                        {tdConnecting ? t('admin.integrations.todoist.connecting') : t('admin.integrations.todoist.connect')}
+                      </MaterialButton>
+                    </div>
+                    <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+                      {t('admin.integrations.todoist.help')}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          <CardDavCard />
+      </div>
+    </div>
+  );
+}
+
+// ─── Email providers (admin) ─────────────────────────────────────────────────
+// How people sign in to Microsoft and Google mailboxes: MailFlow's shared Microsoft app for
+// personal accounts, and the instance's own Microsoft and Google apps. Configuration only;
+// everyone adds their own accounts under Accounts > Add account. (#674)
+function MailSignInTab() {
+  const { t } = useTranslation();
+  const [configs, setConfigs] = useState({});
+  const [status, setStatus] = useState(null); // GET /api/integrations/status
+  const [loading, setLoading] = useState(true);
+  const [msForm, setMsForm] = useState({ clientId: '', clientSecret: '', tenantId: '', redirectUri: '' });
+  const [googleForm, setGoogleForm] = useState({ clientId: '', clientSecret: '', redirectUri: '' });
+  const [msSetupOpen, setMsSetupOpen] = useState(false);
+  const [googleSetupOpen, setGoogleSetupOpen] = useState(false);
+  const [saving, setSaving] = useState(null); // 'microsoft' | 'google'
+  const [messages, setMessages] = useState({}); // provider -> { error, text }
+
+  const refreshStatus = () => api.getIntegrationsStatus().then(setStatus).catch(console.error);
+  useEffect(() => {
+    Promise.all([
+      api.getIntegrations().then((data) => {
+        setConfigs(data || {});
+        if (data?.microsoft) setMsForm({ clientId: data.microsoft.clientId || '', clientSecret: data.microsoft.clientSecret || '', tenantId: data.microsoft.tenantId || '', redirectUri: data.microsoft.redirectUri || '' });
+        if (data?.google) setGoogleForm({ clientId: data.google.clientId || '', clientSecret: data.google.clientSecret || '', redirectUri: data.google.redirectUri || '' });
+      }).catch(console.error),
+      refreshStatus(),
+    ]).finally(() => setLoading(false));
+  }, []);
+
+  const origin = window.location.origin;
+  const msRedirect = `${origin}/oauth/microsoft/callback`;
+  const googleRedirect = `${origin}/oauth/google/callback`;
+  const ms = status?.microsoft || {};
+  const googleConfigured = !!configs.google?.clientId || !!status?.google?.configured;
+  // Sign-in on Google's page cannot work without a redirect URI; one in .env will do (#676).
+  const googleRequired = ['clientId', 'clientSecret', ...(status?.google?.envRedirectUri ? [] : ['redirectUri'])];
+  const say = (provider, text, error = false) => setMessages(m => ({ ...m, [provider]: text ? { text, error } : null }));
+
+  const save = async (provider, form, required) => {
+    if (required.some(k => !String(form[k] ?? '').trim())) { say(provider, t('mailSignIn.required'), true); return; }
+    setSaving(provider);
+    say(provider, '');
+    try {
+      await api.saveIntegration(provider, form);
+      setConfigs(c => ({ ...c, [provider]: { ...form } }));
+      await refreshStatus();
+      say(provider, t('mailSignIn.saved'));
+    } catch (err) {
+      say(provider, err.code === 'redirect_uri_required'
+        ? t('mailSignIn.redirectRequired', { defaultValue: err.message })
+        : t('common.error', { message: err.message }), true);
+    } finally {
+      setSaving(null);
+    }
+  };
+  const remove = async (provider) => {
+    say(provider, '');
+    try {
+      await api.deleteIntegration(provider);
+      setConfigs(c => { const n = { ...c }; delete n[provider]; return n; });
+      if (provider === 'microsoft') setMsForm({ clientId: '', clientSecret: '', tenantId: '', redirectUri: '' });
+      else setGoogleForm({ clientId: '', clientSecret: '', redirectUri: '' });
+      await refreshStatus();
+    } catch (err) {
+      say(provider, t('common.error', { message: err.message }), true);
+    }
+  };
+  const toggleShared = async (on) => {
+    say('microsoft', '');
+    try {
+      await api.setMsBuiltinApp(on);
+      await refreshStatus();
+    } catch (err) {
+      say('microsoft', t('common.error', { message: err.message }), true);
+    }
+  };
+
+  const card = { border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden', marginBottom: 14 };
+  const header = { padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12, background: 'var(--bg-tertiary)' };
+  const section = { padding: 16, borderTop: '1px solid var(--border-subtle)' };
+  const sectionTitle = { fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 };
+  const pill = (on, label) => (
+    <span data-status={on ? 'on' : 'off'} style={{
+      display: 'inline-block', fontSize: 'var(--md-sys-typescale-body-small-size)', padding: '3px 8px', borderRadius: 'var(--md-sys-shape-corner-extra-large)', fontWeight: 500,
+      background: on ? 'rgba(74,222,128,0.1)' : 'var(--bg-elevated)', color: on ? 'var(--green)' : 'var(--text-tertiary)',
+      border: `1px solid ${on ? 'rgba(74,222,128,0.25)' : 'var(--border)'}`,
+    }}>{label}</span>
+  );
+  const disclosure = (open, setOpen, label) => (
+    <MaterialButton variant="text" type="button" aria-expanded={open} onClick={() => setOpen(!open)} style={{
+      display: 'flex', alignItems: 'center', gap: 6, marginTop: 12, padding: 0, background: 'none', border: 'none',
+      color: 'var(--accent)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, cursor: 'pointer',
+    }}>
+      <MaterialIcon name="chevron_right" />
+      {label}
+    </MaterialButton>
+  );
+  const guide = (titleKey, stepKeys, extraKey) => (
+    <div style={{
+      padding: '12px 14px', borderRadius: 'var(--md-sys-shape-corner-small)', margin: '12px 0 16px',
+      background: 'rgba(124,106,247,0.06)', border: '1px solid rgba(124,106,247,0.15)',
+      fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', lineHeight: 1.7,
+    }}>
+      <div style={{ fontWeight: 600, color: 'var(--accent)', marginBottom: 6 }}>{t(titleKey)}</div>
+      <ol style={{ margin: 0, paddingLeft: 18, listStyle: 'decimal' }}>{stepKeys.map(k => <li key={k}>{t(k)}</li>)}</ol>
+      {extraKey && <div style={{ marginTop: 8, color: 'var(--text-tertiary)' }}>{t(extraKey)}</div>}
+    </div>
+  );
+  const mono = { ...inputStyle, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 };
+  const message = (provider) => messages[provider] && (
+    <div role={messages[provider].error ? 'alert' : 'status'} style={{
+      padding: '9px 12px', borderRadius: 'var(--md-sys-shape-corner-small)', margin: '12px 0 0', fontSize: 'var(--md-sys-typescale-body-medium-size)',
+      background: messages[provider].error ? 'rgba(248,113,113,0.1)' : 'rgba(74,222,128,0.1)',
+      border: `1px solid ${messages[provider].error ? 'rgba(248,113,113,0.3)' : 'rgba(74,222,128,0.2)'}`,
+      color: messages[provider].error ? 'var(--red)' : 'var(--green)',
+    }}>{messages[provider].text}</div>
+  );
+  const BUTTON_KEYS = {
+    microsoft: { save: 'admin.integrations.microsoft.save', remove: 'admin.integrations.microsoft.remove' },
+    google: { save: 'admin.integrations.google.save', remove: 'admin.integrations.google.remove' },
+  };
+  const buttons = (provider, form, required, configured) => (
+    <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+      <MaterialButton variant="filled" type="button" onClick={() => save(provider, form, required)} disabled={saving === provider} style={{
+        padding: '8px 16px', background: 'var(--accent)', border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--accent-text)',
+        cursor: saving === provider ? 'not-allowed' : 'pointer', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, opacity: saving === provider ? 0.7 : 1,
+      }}>{saving === provider ? t('common.saving') : t(BUTTON_KEYS[provider].save)}</MaterialButton>
+      {configured && (
+        <MaterialButton variant="outlined" type="button" onClick={() => remove(provider)} style={{
+          padding: '8px 14px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)',
+          color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-medium-size)',
+        }}>{t(BUTTON_KEYS[provider].remove)}</MaterialButton>
+      )}
+    </div>
+  );
+
+  const personalLabel = ms.personalVia === 'own' ? t('mailSignIn.ms.statusOwn')
+    : ms.personalVia === 'shared' ? t('mailSignIn.ms.statusShared') : t('mailSignIn.ms.statusOff');
+
+  return (
+    <div className="mf-signin-form">
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>{t('mailSignIn.title')}</div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', marginBottom: 20, lineHeight: 1.5 }}>{t('mailSignIn.description')}</div>
+      {loading && <div style={{ color: 'var(--text-tertiary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>{t('admin.integrations.loading')}</div>}
+      {!loading && (<>
+        <div style={card} data-card="microsoft">
+          <div style={header}>
+            <svg width="20" height="20" viewBox="0 0 21 21" fill="none" aria-hidden="true">
+              <rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
+              <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
+            </svg>
+            <div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)' }}>{t('mailSignIn.ms.title')}</div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>{t('mailSignIn.ms.description')}</div>
+            </div>
+          </div>
+
+          <div style={section} data-section="personal">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+              <div style={sectionTitle}>{t('mailSignIn.ms.personalTitle')}</div>
+              {pill(!!ms.personalVia, personalLabel)}
+            </div>
+            {ms.builtinAppShipped && (
+              <ToggleRow label={t('mailSignIn.ms.sharedSwitch')} desc={t('mailSignIn.ms.sharedSwitchDesc')}
+                checked={!!ms.builtinApp} onChange={toggleShared} />
+            )}
+            {ms.personalVia === 'own' && (
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginTop: 10, lineHeight: 1.5 }}>{t('mailSignIn.ms.ownHandlesPersonal')}</div>
+            )}
+          </div>
+
+          <div style={section} data-section="work">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <div style={sectionTitle}>{t('mailSignIn.ms.workTitle')}</div>
+              {pill(!!ms.workAccounts, ms.workAccounts ? t('mailSignIn.ms.statusOwn') : t('mailSignIn.ms.workOff'))}
+            </div>
+            {disclosure(msSetupOpen, setMsSetupOpen, t('mailSignIn.ms.setupToggle'))}
+            {msSetupOpen && (
+              <div>
+                {guide('admin.integrations.microsoft.setupTitle', ['admin.integrations.microsoft.step1', 'admin.integrations.microsoft.step2', 'admin.integrations.microsoft.step3', 'admin.integrations.microsoft.step4', 'admin.integrations.microsoft.step5', 'admin.integrations.microsoft.step6'])}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+                  <Field label={t('admin.integrations.microsoft.clientId')} required>
+                    <MaterialInput value={msForm.clientId} onChange={e => setMsForm(f => ({ ...f, clientId: e.target.value }))}
+                      placeholder={t('admin.integrations.microsoft.clientIdPh')} style={mono} />
+                  </Field>
+                  <Field label={t('admin.integrations.microsoft.tenantId')} required>
+                    <MaterialInput value={msForm.tenantId} onChange={e => setMsForm(f => ({ ...f, tenantId: e.target.value }))}
+                      placeholder={t('admin.integrations.microsoft.tenantIdPh')} style={mono} />
+                    <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 5 }}>{t('admin.integrations.microsoft.tenantIdNote')}</div>
+                  </Field>
+                </div>
+                <Field label={t('admin.integrations.microsoft.clientSecret')}>
+                  <MaterialInput type="password" autoComplete="new-password" value={msForm.clientSecret}
+                    onChange={e => setMsForm(f => ({ ...f, clientSecret: e.target.value }))}
+                    placeholder={t('admin.integrations.microsoft.clientSecretPh')} style={inputStyle} />
+                </Field>
+                <Field label={t('admin.integrations.microsoft.redirectUri')}>
+                  <MaterialInput value={msForm.redirectUri} onChange={e => setMsForm(f => ({ ...f, redirectUri: e.target.value }))}
+                    placeholder={msRedirect} style={inputStyle} />
+                  <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 5 }}>{t('admin.integrations.microsoft.redirectUriNote', { uri: msRedirect })}</div>
+                </Field>
+                {buttons('microsoft', msForm, ['clientId', 'tenantId'], !!configs.microsoft?.clientId)}
+              </div>
+            )}
+            {message('microsoft')}
+          </div>
+        </div>
+
+        <div style={card} data-card="google">
+          <div style={header}>
+            <MaterialIcon name="mail" />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)' }}>{t('admin.integrations.google.title')}</div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>{t('admin.integrations.google.description')}</div>
+            </div>
+            {pill(googleConfigured, googleConfigured ? t('admin.integrations.google.configured') : t('admin.integrations.google.notConfigured'))}
+          </div>
+          <div style={section}>
+            {disclosure(googleSetupOpen, setGoogleSetupOpen, t('mailSignIn.google.setupToggle'))}
+            {googleSetupOpen && (
+              <div>
+                {guide('admin.integrations.google.setupTitle', ['admin.integrations.google.step1', 'admin.integrations.google.step2', 'admin.integrations.google.step3', 'admin.integrations.google.step4'], 'admin.integrations.google.scopeNote')}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+                  <Field label={t('admin.integrations.google.clientId')} required>
+                    <MaterialInput value={googleForm.clientId} onChange={e => setGoogleForm(f => ({ ...f, clientId: e.target.value }))}
+                      placeholder={t('admin.integrations.google.clientIdPh')} style={mono} />
+                  </Field>
+                  <Field label={t('admin.integrations.google.clientSecret')} required>
+                    <MaterialInput type="password" autoComplete="new-password" value={googleForm.clientSecret}
+                      onChange={e => setGoogleForm(f => ({ ...f, clientSecret: e.target.value }))}
+                      placeholder={t('admin.integrations.google.clientSecretPh')} style={mono} />
+                  </Field>
+                </div>
+                <Field label={t('admin.integrations.google.redirectUri')} required={googleRequired.includes('redirectUri')}>
+                  <MaterialInput value={googleForm.redirectUri} onChange={e => setGoogleForm(f => ({ ...f, redirectUri: e.target.value }))}
+                    placeholder={googleRedirect} style={mono} />
+                  <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 5 }}>{t('admin.integrations.google.redirectUriNote', { uri: googleRedirect })}</div>
+                </Field>
+                {buttons('google', googleForm, googleRequired, !!configs.google?.clientId)}
+              </div>
+            )}
+            {message('google')}
+          </div>
+        </div>
+      </>)}
+    </div>
+  );
+}
+
+// ─── Users Tab ────────────────────────────────────────────────────────────────
+// ─── SSO / OIDC Tab ───────────────────────────────────────────────────────────
+
+// Provider templates — pre-fill the OIDC form with known-good defaults.
+// issuer_url values that contain placeholder text (your-domain, your-realm, etc.)
+// must be edited by the user before saving.
+const SSO_TEMPLATES = [
+  {
+    id: 'pocketid',
+    name: 'PocketID',
+    slug: 'pocketid',
+    color: '#6366f1',
+    description: 'Lightweight self-hosted OIDC',
+    issuer_url: 'https://your-pocketid-domain.com',
+    scopes: 'openid email profile',
+    note: 'Set the issuer URL to the root URL of your PocketID instance. The client ID and secret are created under Admin → Clients.',
+  },
+  {
+    id: 'authentik',
+    name: 'Authentik',
+    slug: 'authentik',
+    color: '#7c3aed',
+    description: 'Self-hosted identity provider',
+    issuer_url: 'https://auth.example.com/application/o/your-app-slug/',
+    scopes: 'openid email profile',
+    note: 'Replace "your-app-slug" with the slug of your Authentik OAuth2/OIDC Provider application. Include the trailing slash.',
+  },
+  {
+    id: 'authelia',
+    name: 'Authelia',
+    slug: 'authelia',
+    color: '#f59e0b',
+    description: 'Self-hosted authentication portal',
+    issuer_url: 'https://auth.example.com',
+    scopes: 'openid email profile groups',
+    note: 'Set the issuer URL to the root URL of your Authelia instance. Define the client in your Authelia identity_providers.oidc.clients config.',
+  },
+  {
+    id: 'keycloak',
+    name: 'Keycloak',
+    slug: 'keycloak',
+    color: '#ef4444',
+    description: 'Enterprise identity management',
+    issuer_url: 'https://keycloak.example.com/realms/your-realm',
+    scopes: 'openid email profile',
+    note: 'Replace "your-realm" with your Keycloak realm name. Create the client under Clients → Create client (type: OpenID Connect).',
+  },
+  {
+    id: 'zitadel',
+    name: 'ZITADEL',
+    slug: 'zitadel',
+    color: '#14b8a6',
+    description: 'Cloud-native identity platform',
+    issuer_url: 'https://your-instance.zitadel.cloud',
+    scopes: 'openid email profile',
+    note: 'Use your ZITADEL instance URL. Create a Web application under Projects and set the redirect URI. The issuer is shown on the instance overview page.',
+  },
+  {
+    id: 'kanidm',
+    name: 'Kanidm',
+    slug: 'kanidm',
+    color: '#8b5cf6',
+    description: 'Modern Rust-based identity manager',
+    issuer_url: 'https://idm.example.com/oauth2/openid/client-name',
+    scopes: 'openid email profile',
+    note: 'Replace "client-name" with your OAuth2 RS256 client name. Create the client with: kanidm system oauth2 create <name> <displayname> <origin>',
+  },
+  {
+    id: 'dex',
+    name: 'Dex',
+    slug: 'dex',
+    color: '#0ea5e9',
+    description: 'Federated OpenID Connect provider',
+    issuer_url: 'https://dex.example.com',
+    scopes: 'openid email profile offline_access',
+    note: 'Set the issuer URL to the root URL of your Dex instance (must match the issuer field in your Dex config.yaml).',
+  },
+  {
+    id: 'casdoor',
+    name: 'Casdoor',
+    slug: 'casdoor',
+    color: '#f97316',
+    description: 'Open-source IAM / SSO platform',
+    issuer_url: 'https://your-casdoor-domain.com',
+    scopes: 'openid email profile',
+    note: 'Set the issuer URL to your Casdoor instance root. Create an Application in Casdoor and copy the Client ID and Secret from it.',
+  },
+  {
+    id: 'google',
+    name: 'Google',
+    slug: 'google',
+    color: '#4285F4',
+    description: 'Google Workspace or personal accounts',
+    issuer_url: 'https://accounts.google.com',
+    scopes: 'openid email profile',
+    note: 'Create an OAuth 2.0 Client ID in Google Cloud Console under APIs & Services → Credentials. Set the authorized redirect URI to the callback URL shown below.',
+  },
+  {
+    id: 'entra',
+    name: 'Microsoft Entra',
+    slug: 'entra',
+    color: '#0078d4',
+    description: 'Azure AD / Microsoft 365',
+    issuer_url: 'https://login.microsoftonline.com/your-tenant-id/v2.0',
+    scopes: 'openid email profile',
+    note: 'Replace "your-tenant-id" with your Azure directory (tenant) ID. Register an app in Entra ID and add the callback URL as a Web redirect URI.',
+  },
+  {
+    id: 'gitlab',
+    name: 'GitLab',
+    slug: 'gitlab',
+    color: '#FC6D26',
+    description: 'GitLab.com or self-hosted GitLab',
+    issuer_url: 'https://gitlab.com',
+    scopes: 'openid email profile',
+    note: 'For self-hosted GitLab, replace the issuer URL with your instance URL. Create an application under Admin Area → Applications (or user/group settings).',
+  },
+  {
+    id: 'custom',
+    name: 'Custom',
+    slug: '',
+    color: '#6b7280',
+    description: 'Any OIDC-compatible provider',
+    issuer_url: '',
+    scopes: 'openid email profile',
+    note: '',
+  },
+];
+
+const emptyProvider = {
+  name: '', slug: '', issuer_url: '', client_id: '', client_secret: '',
+  scopes: 'openid email profile', provisioning_mode: 'login_existing_only',
+  allowed_domains: '', enabled: true, require_email_verified: true, allow_insecure: false,
+  admin_group_claim: '', admin_group_value: '', rp_initiated_logout: false, idp_enforces_mfa: false,
+  login_match_claim: 'email',
+};
+
+function SSOTab() {
+  const { t } = useTranslation();
+  const PROVISIONING_MODES = [
+    { value: 'disabled', label: t('admin.sso.provisioningDisabled') },
+    { value: 'login_existing_only', label: t('admin.sso.provisioningExisting') },
+    { value: 'open', label: t('admin.sso.provisioningOpen') },
+  ];
+  const [providers, setProviders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(null); // null | 'new' | provider object
+  const [form, setForm] = useState(emptyProvider);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
+  const [uriCopyFailedId, setUriCopyFailedId] = useState(null);
+  const [templateNote, setTemplateNote] = useState('');
+  const [internalAuthDisabled, setInternalAuthDisabled] = useState(false);
+  const [internalAuthSaving, setInternalAuthSaving] = useState(false);
+  const [internalAuthError, setInternalAuthError] = useState('');
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => {
+    // A failed load must never render as an empty list. Reporting only to console.error
+    // made a broken fetch indistinguishable from "no providers configured", which can
+    // hide a live SSO provider from the admin who believes it is gone.
+    const fetchProviders = api.admin.oidc.getProviders()
+      .then(d => setProviders(d.providers))
+      .catch(err => setLoadError(err.message));
+    const fetchSettings = api.admin.getSettings()
+      .then(d => setInternalAuthDisabled(d.settings.internal_auth_disabled === 'true'))
+      .catch(err => setLoadError(err.message));
+    Promise.all([fetchProviders, fetchSettings]).finally(() => setLoading(false));
+  }, []);
+
+  const handleToggleInternalAuth = () => {
+    setInternalAuthError('');
+    if (!internalAuthDisabled) {
+      setConfirmDialog({
+        title: t('admin.sso.passwordLoginDisableTitle'),
+        message: t('admin.sso.passwordLoginDisableMsg'),
+        confirmLabel: t('admin.sso.passwordLoginDisableConfirm'),
+        onConfirm: async () => {
+          setInternalAuthSaving(true);
+          try {
+            await api.admin.updateSettings({ internal_auth_disabled: true });
+            setInternalAuthDisabled(true);
+          } catch (err) {
+            setInternalAuthError(err.message);
+          } finally {
+            setInternalAuthSaving(false);
+          }
+        },
+      });
+    } else {
+      setInternalAuthSaving(true);
+      api.admin.updateSettings({ internal_auth_disabled: false })
+        .then(() => setInternalAuthDisabled(false))
+        .catch(err => setInternalAuthError(err.message))
+        .finally(() => setInternalAuthSaving(false));
+    }
+  };
+
+  const openNew = () => { setEditing('picking'); setError(''); };
+
+  const applyTemplate = (tmpl) => {
+    setForm({ ...emptyProvider, name: tmpl.id === 'custom' ? '' : tmpl.name, slug: tmpl.slug, issuer_url: tmpl.issuer_url, scopes: tmpl.scopes });
+    setTemplateNote(tmpl.note || '');
+    setEditing('new');
+    setError('');
+  };
+  const openEdit = (p) => {
+    setForm({ ...p, client_secret: '••••••••', allowed_domains: p.allowed_domains || '', require_email_verified: p.require_email_verified !== false, allow_insecure: p.allow_insecure === true, admin_group_claim: p.admin_group_claim || '', admin_group_value: p.admin_group_value || '', rp_initiated_logout: p.rp_initiated_logout === true, idp_enforces_mfa: p.idp_enforces_mfa === true, login_match_claim: p.login_match_claim || 'email' });
+    setTemplateNote('');
+    setEditing(p);
+    setError('');
+  };
+  const closeForm = () => { setEditing(null); setTemplateNote(''); setError(''); };
+
+  const handleSave = async () => {
+    if (!form.name || !form.slug || !form.issuer_url || !form.client_id) {
+      return setError(t('admin.sso.errorRequired'));
+    }
+    if (editing === 'new' && !form.client_secret) {
+      return setError(t('admin.sso.errorSecretRequired'));
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const payload = {
+        name: form.name.trim(),
+        slug: form.slug.trim(),
+        issuer_url: form.issuer_url.trim(),
+        client_id: form.client_id.trim(),
+        scopes: form.scopes.trim() || 'openid email profile',
+        provisioning_mode: form.provisioning_mode,
+        allowed_domains: form.allowed_domains.trim() || null,
+        enabled: form.enabled,
+        require_email_verified: !!form.require_email_verified,
+        allow_insecure: !!form.allow_insecure,
+        admin_group_claim: form.admin_group_claim.trim() || null,
+        admin_group_value: form.admin_group_value.trim() || null,
+        rp_initiated_logout: !!form.rp_initiated_logout,
+        idp_enforces_mfa: !!form.idp_enforces_mfa,
+        login_match_claim: (form.login_match_claim || '').trim() || 'email',
+        ...(form.client_secret && form.client_secret !== '••••••••' ? { client_secret: form.client_secret } : {}),
+      };
+      if (editing === 'new') {
+        if (!payload.client_secret) return setError(t('admin.sso.errorSecretRequired'));
+        const data = await api.admin.oidc.createProvider(payload);
+        setProviders(ps => [...ps, data.provider]);
+      } else {
+        const data = await api.admin.oidc.updateProvider(editing.id, payload);
+        setProviders(ps => ps.map(p => p.id === editing.id ? data.provider : p));
+      }
+      closeForm();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = (p) => {
+    setConfirmDialog({
+      title: t('admin.sso.deleteConfirmTitle', { name: p.name }),
+      message: t('admin.sso.deleteConfirmBody'),
+      confirmLabel: t('admin.sso.deleteConfirmLabel'),
+      onConfirm: async () => {
+        await api.admin.oidc.deleteProvider(p.id);
+        setProviders(ps => ps.filter(x => x.id !== p.id));
+      },
+    });
+  };
+
+  const copyRedirectUri = async (slug, id) => {
+    const uri = `${window.location.origin}/auth/oidc/${slug}/callback`;
+    const { ok } = await copyToClipboard(uri);
+    setCopiedId(ok ? id : null);
+    setUriCopyFailedId(ok ? null : id);
+    setTimeout(() => { setCopiedId(null); setUriCopyFailedId(null); }, 2000);
+  };
+
+  if (loading) return <div style={{ color: 'var(--text-tertiary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>{t('common.loading')}</div>;
+
+  return (
+    <>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>{t('admin.sso.title')}</div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', marginBottom: 16 }}>
+        {t('admin.sso.description')}
+      </div>
+
+      {/* ── Password login toggle ── */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+          {t('admin.sso.passwordLoginTitle')}
+        </div>
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', marginBottom: 10 }}>
+          {t('admin.sso.passwordLoginDesc')}
+        </div>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 14px', borderRadius: 'var(--md-sys-shape-corner-small)',
+          background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
+        }}>
+          <div>
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)' }}>
+              {t('admin.sso.passwordLoginTitle')}
+            </div>
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>
+              {internalAuthDisabled ? t('admin.sso.passwordLoginDisabledDesc') : t('admin.sso.passwordLoginEnabledDesc')}
+            </div>
+          </div>
+          <MaterialButton aria-label={t('admin.sso.passwordLoginTitle')} aria-checked={!(internalAuthDisabled)} role="switch" variant="switch" selected={!(internalAuthDisabled)}
+            onClick={handleToggleInternalAuth}
+            disabled={internalAuthSaving}
+            style={{
+              width: 44, height: 24, borderRadius: 'var(--md-sys-shape-corner-medium)',
+              background: internalAuthDisabled ? TOGGLE_OFF_BACKGROUND : 'var(--accent)',
+              border: `1px solid ${internalAuthDisabled ? 'var(--border)' : 'var(--accent)'}`,
+              cursor: internalAuthSaving ? 'not-allowed' : 'pointer',
+              position: 'relative', transition: 'all 0.2s', flexShrink: 0,
+              opacity: internalAuthSaving ? 0.6 : 1,
+            }}
+          >
+            <div style={{
+              position: 'absolute', top: 3, left: internalAuthDisabled ? 3 : 22,
+              width: 16, height: 16, borderRadius: '50%',
+              background: 'white', transition: 'left 0.2s',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+            }} />
+          </MaterialButton>
+        </div>
+        {internalAuthError && (
+          <div style={{
+            marginTop: 8, padding: '8px 12px',
+            background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)',
+            borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--red)', fontSize: 'var(--md-sys-typescale-body-small-size)',
+          }}>{internalAuthError}</div>
+        )}
+      </div>
+
+      <div style={{ height: 1, background: 'var(--border-subtle)', marginBottom: 20 }} />
+
+      {loadError && (
+        <div style={{
+          padding: '12px 14px', marginBottom: 16, borderRadius: 'var(--md-sys-shape-corner-small)',
+          background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)',
+          color: 'var(--red)', fontSize: 'var(--md-sys-typescale-body-medium-size)',
+        }}>{t('common.error', { message: loadError })}</div>
+      )}
+
+      {!loadError && providers.length === 0 && !editing && (
+        <div style={{
+          padding: '24px', borderRadius: 'var(--md-sys-shape-corner-small)', border: '1px dashed var(--border)',
+          textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 'var(--md-sys-typescale-body-medium-size)', marginBottom: 16,
+        }}>
+          {t('admin.sso.empty')}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+        {providers.map(p => (
+          <div key={p.id} style={{
+            padding: '12px 14px', borderRadius: 'var(--md-sys-shape-corner-small)',
+            background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                  <span style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)' }}>{p.name}</span>
+                  <span style={{
+                    fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 600, padding: '1px 6px', borderRadius: 'var(--md-sys-shape-corner-extra-small)',
+                    background: p.enabled ? 'rgba(34,197,94,0.15)' : 'var(--bg-elevated)',
+                    color: p.enabled ? 'var(--green)' : 'var(--text-tertiary)',
+                    border: `1px solid ${p.enabled ? 'rgba(34,197,94,0.3)' : 'var(--border)'}`,
+                    textTransform: 'uppercase', letterSpacing: '0.04em',
+                  }}>{p.enabled ? t('admin.sso.activeBadge') : t('admin.sso.disabledBadge')}</span>
+                </div>
+                <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontFamily: 'monospace' }}>{p.issuer_url}</span>
+                </div>
+                <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', flexShrink: 0 }}>{t('admin.integrations.microsoft.redirectUri')}:</span>
+                  <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', fontFamily: 'monospace', color: 'var(--text-secondary)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {`${window.location.origin}/auth/oidc/${p.slug}/callback`}
+                  </span>
+                  <MaterialButton variant="outlined"
+                    onClick={() => copyRedirectUri(p.slug, p.id)}
+                    style={{
+                      background: 'none', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-extra-small)',
+                      color: copiedId === p.id ? 'var(--green)' : 'var(--text-tertiary)',
+                      fontSize: 'var(--md-sys-typescale-body-small-size)', padding: '2px 7px', cursor: 'pointer', flexShrink: 0,
+                    }}
+                  >
+                    {copiedId === p.id ? t('admin.sso.copiedUri')
+                      : uriCopyFailedId === p.id ? t('common.copyFailed')
+                        : t('admin.sso.copyUri')}
+                  </MaterialButton>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                <MaterialButton variant="outlined" onClick={() => openEdit(p)} style={{
+                  background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+                  borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--text-secondary)', fontSize: 'var(--md-sys-typescale-body-small-size)',
+                  padding: '5px 10px', cursor: 'pointer',
+                }}>{t('admin.sso.editButton')}</MaterialButton>
+                <MaterialButton variant="outlined" onClick={() => handleDelete(p)} style={{
+                  background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)',
+                  borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--red)', fontSize: 'var(--md-sys-typescale-body-small-size)',
+                  padding: '5px 10px', cursor: 'pointer',
+                }}>{t('admin.sso.deleteButton')}</MaterialButton>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {!editing && (
+        <MaterialButton variant="filled"
+          onClick={openNew}
+          style={{
+            padding: '9px 16px', background: 'var(--accent)', border: 'none',
+            borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--accent-text)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, cursor: 'pointer',
+          }}
+        >{t('admin.sso.addProvider')}</MaterialButton>
+      )}
+
+      {editing === 'picking' && (
+        <div style={{
+          marginTop: 16, padding: '20px', borderRadius: 'var(--md-sys-shape-corner-medium)',
+          background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
+        }}>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+            {t('admin.sso.templatePickerTitle')}
+          </div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', marginBottom: 16 }}>
+            {t('admin.sso.templatePickerDesc')}
+          </div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+            gap: 10,
+            marginBottom: 16,
+          }}>
+            {SSO_TEMPLATES.map(tmpl => (
+              <MaterialButton variant="card"
+                key={tmpl.id}
+                onClick={() => applyTemplate(tmpl)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '10px 12px', borderRadius: 'var(--md-sys-shape-corner-small)', cursor: 'pointer',
+                  background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+                  textAlign: 'left', transition: 'border-color 0.15s',
+                }}
+                
+                
+              >
+                <div style={{
+                  width: 32, height: 32, borderRadius: 'var(--md-sys-shape-corner-small)', flexShrink: 0,
+                  background: tmpl.color, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 700, color: 'white',
+                }}>
+                  {tmpl.name.charAt(0)}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {tmpl.name}
+                  </div>
+                  <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {tmpl.description}
+                  </div>
+                </div>
+              </MaterialButton>
+            ))}
+          </div>
+          <MaterialButton variant="outlined"
+            onClick={closeForm}
+            style={{
+              padding: '9px 18px', background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+              borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--text-secondary)', fontSize: 'var(--md-sys-typescale-body-medium-size)', cursor: 'pointer',
+            }}
+          >{t('common.cancel')}</MaterialButton>
+        </div>
+      )}
+
+      {editing && editing !== 'picking' && (
+        <div style={{
+          marginTop: 16, padding: '20px', borderRadius: 'var(--md-sys-shape-corner-medium)',
+          background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
+        }}>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 16 }}>
+            {editing === 'new' ? t('admin.sso.newTitle') : t('admin.sso.editTitle', { name: editing.name })}
+          </div>
+
+          <Field label={t('admin.sso.name')} required>
+            <MaterialInput value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder={t('admin.sso.namePh')} style={inputStyle} />
+          </Field>
+
+          <Field label={t('admin.sso.slug')} required>
+            <MaterialInput
+              value={form.slug}
+              onChange={e => setForm(f => ({ ...f, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') }))}
+              placeholder={t('admin.sso.slugPh')}
+              style={inputStyle}
+            />
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 4 }}>
+              {t('admin.sso.slugRedirectUri', { uri: `${window.location.origin}/auth/oidc/${form.slug || '<slug>'}/callback` })}
+            </div>
+          </Field>
+
+          <Field label={t('admin.sso.issuerUrl')} required>
+            <MaterialInput value={form.issuer_url} onChange={e => setForm(f => ({ ...f, issuer_url: e.target.value }))} placeholder={t('admin.sso.issuerUrlPh')} style={inputStyle} />
+          </Field>
+
+          {templateNote && (
+            <div style={{
+              marginBottom: 14, padding: '10px 12px', borderRadius: 'var(--md-sys-shape-corner-small)',
+              background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)',
+              color: 'var(--text-secondary)', fontSize: 'var(--md-sys-typescale-body-small-size)', lineHeight: 1.5,
+            }}>
+              {templateNote}
+            </div>
+          )}
+
+          <div className="admin-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Field label={t('admin.sso.clientId')} required>
+              <MaterialInput value={form.client_id} onChange={e => setForm(f => ({ ...f, client_id: e.target.value }))} placeholder={t('admin.sso.clientIdPh')} style={inputStyle} />
+            </Field>
+            <Field label={editing === 'new' ? t('admin.sso.clientSecretNew') : t('admin.sso.clientSecretEdit')} required={editing === 'new'}>
+              <MaterialInput
+                type="password"
+                autoComplete="new-password"
+                value={form.client_secret}
+                onChange={e => setForm(f => ({ ...f, client_secret: e.target.value }))}
+                placeholder={editing === 'new' ? t('admin.sso.clientSecretPhNew') : t('admin.sso.clientSecretPhEdit')}
+                style={inputStyle}
+              />
+            </Field>
+          </div>
+
+          <Field label={t('admin.sso.scopes')}>
+            <MaterialInput value={form.scopes} onChange={e => setForm(f => ({ ...f, scopes: e.target.value }))} placeholder={t('admin.sso.scopesPh')} style={inputStyle} />
+          </Field>
+
+          <Field label={t('admin.sso.domains')}>
+            <MaterialInput value={form.allowed_domains} onChange={e => setForm(f => ({ ...f, allowed_domains: e.target.value }))} placeholder={t('admin.sso.domainsPh')} style={inputStyle} />
+          </Field>
+
+          <Field label={t('admin.sso.adminGroupClaim')}>
+            <MaterialInput value={form.admin_group_claim} onChange={e => setForm(f => ({ ...f, admin_group_claim: e.target.value }))} placeholder={t('admin.sso.adminGroupClaimPh')} style={inputStyle} />
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 4 }}>{t('admin.sso.adminGroupClaimDesc')}</div>
+          </Field>
+
+          <Field label={t('admin.sso.adminGroupValue')}>
+            <MaterialInput value={form.admin_group_value} onChange={e => setForm(f => ({ ...f, admin_group_value: e.target.value }))} placeholder={t('admin.sso.adminGroupValuePh')} style={inputStyle} />
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 4 }}>{t('admin.sso.adminGroupValueDesc')}</div>
+          </Field>
+
+          <Field label={t('admin.sso.provisioning')}>
+            <MaterialSelect
+              value={form.provisioning_mode}
+              onChange={e => setForm(f => ({ ...f, provisioning_mode: e.target.value }))}
+              style={{ ...inputStyle, appearance: 'none' }}
+            >
+              {PROVISIONING_MODES.map(m => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </MaterialSelect>
+          </Field>
+
+          <Field label={t('admin.sso.loginMatchClaim')}>
+            <MaterialInput
+              value={form.login_match_claim}
+              onChange={e => setForm(f => ({ ...f, login_match_claim: e.target.value }))}
+              placeholder="email"
+              list="oidc-login-match-claims"
+              style={inputStyle}
+            />
+            <datalist id="oidc-login-match-claims">
+              <option value="email" />
+              <option value="preferred_username" />
+              <option value="upn" />
+            </datalist>
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 4 }}>{t('admin.sso.loginMatchClaimDesc')}</div>
+          </Field>
+
+          <div className="admin-setting-toggle" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <MaterialButton aria-label={t('admin.sso.enabled')} aria-checked={form.enabled} role="switch" variant="switch" selected={form.enabled}
+              type="button"
+              onClick={() => setForm(f => ({ ...f, enabled: !f.enabled }))}
+              style={{
+                width: 36, height: 20, borderRadius: 'var(--md-sys-shape-corner-medium)', border: 'none', cursor: 'pointer', padding: 0,
+                background: form.enabled ? 'var(--accent)' : TOGGLE_OFF_BACKGROUND,
+                position: 'relative', transition: 'background 0.2s',
+              }}
+            >
+              <span style={{
+                position: 'absolute', top: 2, left: form.enabled ? 18 : 2, width: 16, height: 16,
+                borderRadius: '50%', background: 'white', transition: 'left 0.2s',
+              }} />
+            </MaterialButton>
+            <span style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>{t('admin.sso.enabled')}</span>
+          </div>
+
+          <div className="admin-setting-toggle admin-setting-support" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 16 }}>
+            <MaterialButton aria-label={t('admin.sso.requireEmailVerified')} aria-checked={form.require_email_verified} role="switch" variant="switch" selected={form.require_email_verified}
+              type="button"
+              onClick={() => setForm(f => ({ ...f, require_email_verified: !f.require_email_verified }))}
+              style={{
+                width: 36, height: 20, borderRadius: 'var(--md-sys-shape-corner-medium)', border: 'none', cursor: 'pointer', padding: 0,
+                background: form.require_email_verified ? 'var(--accent)' : TOGGLE_OFF_BACKGROUND,
+                position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginTop: 1,
+              }}
+            >
+              <span style={{
+                position: 'absolute', top: 2, left: form.require_email_verified ? 18 : 2, width: 16, height: 16,
+                borderRadius: '50%', background: 'white', transition: 'left 0.2s',
+              }} />
+            </MaterialButton>
+            <div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>{t('admin.sso.requireEmailVerified')}</div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>{t('admin.sso.requireEmailVerifiedDesc')}</div>
+            </div>
+          </div>
+
+          <div className="admin-setting-toggle admin-setting-support" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 16 }}>
+            <MaterialButton aria-label={t('admin.sso.allowInsecure')} aria-checked={form.allow_insecure} role="switch" variant="switch"
+              type="button"
+              onClick={() => setForm(f => ({ ...f, allow_insecure: !f.allow_insecure }))}
+              style={{
+                width: 36, height: 20, borderRadius: 'var(--md-sys-shape-corner-medium)', border: 'none', cursor: 'pointer', padding: 0,
+                background: form.allow_insecure ? 'var(--amber)' : TOGGLE_OFF_BACKGROUND,
+                position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginTop: 1,
+              }}
+            >
+              <span style={{
+                position: 'absolute', top: 2, left: form.allow_insecure ? 18 : 2, width: 16, height: 16,
+                borderRadius: '50%', background: 'white', transition: 'left 0.2s',
+              }} />
+            </MaterialButton>
+            <div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>{t('admin.sso.allowInsecure')}</div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>{t('admin.sso.allowInsecureDesc')}</div>
+            </div>
+          </div>
+
+          <div className="admin-setting-toggle admin-setting-support" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 16 }}>
+            <MaterialButton aria-label={t('admin.sso.rpLogout')} aria-checked={form.rp_initiated_logout} role="switch" variant="switch" selected={form.rp_initiated_logout}
+              type="button"
+              onClick={() => setForm(f => ({ ...f, rp_initiated_logout: !f.rp_initiated_logout }))}
+              style={{
+                width: 36, height: 20, borderRadius: 'var(--md-sys-shape-corner-medium)', border: 'none', cursor: 'pointer', padding: 0,
+                background: form.rp_initiated_logout ? 'var(--accent)' : TOGGLE_OFF_BACKGROUND,
+                position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginTop: 1,
+              }}
+            >
+              <span style={{
+                position: 'absolute', top: 2, left: form.rp_initiated_logout ? 18 : 2, width: 16, height: 16,
+                borderRadius: '50%', background: 'white', transition: 'left 0.2s',
+              }} />
+            </MaterialButton>
+            <div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>{t('admin.sso.rpLogout')}</div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>{t('admin.sso.rpLogoutDesc')}</div>
+            </div>
+          </div>
+
+          <div className="admin-setting-toggle admin-setting-support" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 16 }}>
+            <MaterialButton type="button" role="switch" variant="switch"
+              aria-label={t('admin.sso.idpEnforcesMfa')} aria-checked={!!form.idp_enforces_mfa}
+              onClick={() => setForm(f => ({ ...f, idp_enforces_mfa: !f.idp_enforces_mfa }))} />
+            <div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>{t('admin.sso.idpEnforcesMfa')}</div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>{t('admin.sso.idpEnforcesMfaDesc')}</div>
+            </div>
+          </div>
+
+          {error && (
+            <div style={{
+              marginBottom: 14, padding: '9px 12px', borderRadius: 'var(--md-sys-shape-corner-small)',
+              background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)',
+              color: 'var(--red)', fontSize: 'var(--md-sys-typescale-body-medium-size)',
+            }}>{error}</div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <MaterialButton variant="filled"
+              onClick={handleSave}
+              disabled={saving}
+              style={{
+                padding: '9px 18px', background: 'var(--accent)', border: 'none',
+                borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--accent-text)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
+                cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.6 : 1,
+              }}
+            >{saving ? t('common.saving') : t('admin.sso.save')}</MaterialButton>
+            <MaterialButton variant="outlined"
+              onClick={closeForm}
+              style={{
+                padding: '9px 18px', background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+                borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--text-secondary)', fontSize: 'var(--md-sys-typescale-body-medium-size)', cursor: 'pointer',
+              }}
+            >{t('common.cancel')}</MaterialButton>
+          </div>
+        </div>
+      )}
+
+      <ConfirmOverlay dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
+    </>
+  );
+}
+
+// ─── AI Section ───────────────────────────────────────────────────────────────
+function AISection() {
+  const { t } = useTranslation();
+  const isMobile = useMobile();
+  const [config, setConfig] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState(() => normalizeAiForm());
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [codexStatus, setCodexStatus] = useState({ connected: false, state: 'disconnected', reconnectRequired: false });
+  const [deviceState, setDeviceState] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const pollerRef = useRef(null);
+  const formRef = useRef(form);
+  const tRef = useRef(t);
+
+  const persistForm = useCallback(async (nextForm) => {
+    const payload = buildAiSavePayload(nextForm);
+    const result = await api.ai.saveConfig(payload);
+    const saved = result.config || payload;
+    const normalized = normalizeAiForm(saved);
+    setConfig(saved);
+    formRef.current = normalized;
+    setForm(normalized);
+  }, []);
+
+  formRef.current = form;
+  tRef.current = t;
+
+  useEffect(() => {
+    let active = true;
+    const refreshCodexStatus = () => api.ai.codex.status()
+      .then((status) => {
+        if (!active) return;
+        setCodexStatus(status);
+        if (status.state === 'pending' && status.device) {
+          pollerRef.current?.start(status.device).catch(() => {});
+        }
+      });
+    pollerRef.current = createCodexDevicePoller({
+      startDevice: api.ai.codex.start,
+      pollDevice: api.ai.codex.poll,
+      cancelDevice: api.ai.codex.cancel,
+      onState: (state) => {
+        if (!active) return;
+        setDeviceState(state);
+        setCopied(false);
+        if (state.phase === 'connected') {
+          const connectedForm = selectAiConnectionMethod({
+            ...formRef.current,
+            accountProvider: AI_PROVIDER_CHATGPT,
+          }, AI_CONNECTION_METHOD_ACCOUNT);
+          persistForm(connectedForm)
+            .then(() => {
+              if (active) setMsg({ type: 'ok', text: tRef.current('admin.ai.saved') });
+            })
+            .catch((error) => {
+              if (active) setMsg({ type: 'error', text: error.message });
+            });
+          refreshCodexStatus().catch(() => {
+            if (active) setCodexStatus({ connected: true, state: 'connected' });
+          });
+        } else if (state.phase === 'failed') {
+          setCodexStatus({ connected: false, state: 'reconnect_required', reconnectRequired: true, reason: state.reason });
+        } else if (['cancelled', 'expired'].includes(state.phase)) {
+          setCodexStatus({ connected: false, state: 'disconnected', reconnectRequired: false });
+        }
+      },
+    });
+
+    Promise.all([
+      api.ai.getConfig().then(({ config: cfg, newUsersEnabled }) => {
+        if (!active) return;
+        // "Allow AI for new users" is kept when no provider is configured, so it comes on its own.
+        const normalized = normalizeAiForm({ ...(cfg || {}), newUsersEnabled });
+        setConfig(cfg);
+        formRef.current = normalized;
+        setForm(normalized);
+      }),
+      refreshCodexStatus(),
+    ])
+      .catch((error) => {
+        if (active) setMsg({ type: 'error', text: error.message });
+      })
+      .finally(() => { if (active) setLoading(false); });
+
+    return () => {
+      active = false;
+      pollerRef.current?.dispose();
+      pollerRef.current = null;
+    };
+  }, [persistForm]);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaving(true); setMsg(null);
+    try {
+      await persistForm(form);
+      setMsg({ type: 'ok', text: t('admin.ai.saved') });
+    } catch (err) {
+      setMsg({ type: 'error', text: err.message });
+    } finally { setSaving(false); }
+  };
+
+  const handleTest = async () => {
+    setTesting(true); setMsg(null);
+    try {
+      await api.ai.test();
+      setMsg({ type: 'ok', text: t('admin.ai.testOk') });
+    } catch (err) {
+      setMsg({ type: 'error', text: `${t('admin.ai.testFail')}: ${err.message}` });
+    } finally { setTesting(false); }
+  };
+
+  const handleConnect = async () => {
+    setConnecting(true); setMsg(null); setDeviceState(null); setCopied(false);
+    try {
+      await pollerRef.current?.start();
+      setCodexStatus({ connected: false, state: 'pending', reconnectRequired: false });
+    } catch (error) {
+      setMsg({ type: 'error', text: error.message });
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    setCancelling(true); setMsg(null);
+    try {
+      await pollerRef.current?.cancel();
+      setCodexStatus({ connected: false, state: 'disconnected', reconnectRequired: false });
+    } catch (error) {
+      setMsg({ type: 'error', text: error.message });
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    setDisconnecting(true); setMsg(null);
+    try {
+      await api.ai.codex.disconnect();
+      setDeviceState(null);
+      setCodexStatus({ connected: false, state: 'disconnected', reconnectRequired: false });
+    } catch (error) {
+      setMsg({ type: 'error', text: error.message });
+    } finally {
+      setDisconnecting(false);
+    }
+  };
+
+  const handleCopyCode = async () => {
+    try {
+      const { ok } = await copyToClipboard(deviceState.userCode);
+      if (!ok) throw new Error('copy failed');
+      setCopied(true);
+    } catch {
+      setMsg({ type: 'error', text: t('admin.ai.copyFailed') });
+    }
+  };
+
+  const field = (label, value, onChange, type = 'text', placeholder = '', help = null) => (
+    <Field label={label}>
+      <MaterialInput type={type} value={value} aria-label={label}
+        onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        autoComplete={type === 'password' ? 'new-password' : 'off'}
+        style={{ width: '100%' }} />
+      {help && <small className="md-supporting-text">{help}</small>}
+    </Field>
+  );
+
+  // A switch inside its label, so the text toggles it too and a screen reader reads its state.
+  const toggle = (label, checked, onChange) => (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', marginBottom: 10 }}>
+      <MaterialButton variant="switch" selected={checked}
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={onChange}
+        style={{
+          width: 36, height: 20, borderRadius: 'var(--md-sys-shape-corner-medium)', position: 'relative', cursor: 'pointer', flexShrink: 0,
+          padding: 0, border: 'none',
+          background: checked ? 'var(--accent)' : 'var(--border)', transition: 'background 0.2s',
+        }}
+      >
+        <span style={{
+          position: 'absolute', top: 2, left: checked ? 18 : 2, width: 16, height: 16,
+          borderRadius: '50%', background: '#fff', transition: 'left 0.2s',
+        }} />
+      </MaterialButton>
+      <span style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-primary)' }}>{label}</span>
+    </label>
+  );
+
+  const msgBox = msg && (
+    <div role="status" aria-live="polite" style={{ padding: '8px 12px', borderRadius: 'var(--md-sys-shape-corner-small)', marginBottom: 14, fontSize: 'var(--md-sys-typescale-body-medium-size)',
+      background: msg.type === 'ok' ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)',
+      color: msg.type === 'ok' ? 'var(--green)' : 'var(--red)',
+      border: `1px solid ${msg.type === 'ok' ? 'rgba(74,222,128,0.2)' : 'rgba(248,113,113,0.2)'}`,
+    }}>{msg.text}</div>
+  );
+
+  if (loading) return <div style={{ color: 'var(--text-tertiary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>{t('common.loading')}</div>;
+
+  const apiSelected = form.connectionMethod === AI_CONNECTION_METHOD_API;
+  const accountSelected = form.connectionMethod === AI_CONNECTION_METHOD_ACCOUNT;
+  const chatgptSelected = accountSelected && form.accountProvider === AI_PROVIDER_CHATGPT;
+  const chatgptConnected = codexStatus.connected === true || deviceState?.phase === 'connected';
+  const reconnectRequired = codexStatus.reconnectRequired === true || codexStatus.state === 'reconnect_required' || deviceState?.phase === 'failed';
+  const pendingDevice = deviceState?.phase === 'pending' ? deviceState : null;
+  const formValid = isAiFormValid(form);
+  const statusLabel = chatgptConnected
+    ? t('admin.ai.statusConnected')
+    : pendingDevice
+      ? t('admin.ai.statusPending')
+      : reconnectRequired
+        ? t('admin.ai.statusReconnect')
+        : deviceState?.phase === 'expired'
+          ? t('admin.ai.statusExpired')
+          : deviceState?.phase === 'cancelled'
+            ? t('admin.ai.statusCancelled')
+            : t('admin.ai.statusDisconnected');
+
+  return (
+    <div>
+      <p style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)', marginTop: 0, marginBottom: 20 }}>
+        {t('admin.ai.description')}
+      </p>
+
+      {!config && (
+        <div style={{ padding: '10px 14px', borderRadius: 'var(--md-sys-shape-corner-small)', background: 'var(--bg-secondary)', border: '1px solid var(--border)', fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)', marginBottom: 20 }}>
+          {t('admin.ai.notConfigured')}
+        </div>
+      )}
+
+      <form onSubmit={handleSave}>
+        {toggle(t('admin.ai.enabled'), form.enabled, () => setForm(f => ({ ...f, enabled: !f.enabled })))}
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ display: 'block', fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 5 }}>{t('admin.ai.connectionMethod')}</label>
+          <MaterialSelect aria-label={t('admin.ai.connectionMethod')}
+            value={form.connectionMethod}
+            onChange={e => setForm(f => selectAiConnectionMethod(f, e.target.value))}
+            style={{ ...inputStyle, cursor: 'pointer' }}
+          >
+            <option value="" disabled>{t('admin.ai.connectionMethodPlaceholder')}</option>
+            {AI_CONNECTION_METHOD_OPTIONS.map(({ value, labelKey }) => (
+              <option key={value} value={value}>{t(labelKey)}</option>
+            ))}
+          </MaterialSelect>
+        </div>
+
+        {accountSelected && (
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: 'block', fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 5 }}>{t('admin.ai.subscriptionProvider')}</label>
+            <MaterialSelect aria-label={t('admin.ai.subscriptionProvider')}
+              value={form.accountProvider}
+              onChange={e => setForm(f => normalizeAiForm({ ...f, accountProvider: e.target.value }))}
+              style={{ ...inputStyle, cursor: 'pointer' }}
+            >
+              {AI_ACCOUNT_PROVIDER_OPTIONS.map(({ value, labelKey }) => (
+                <option key={value} value={value}>{t(labelKey)}</option>
+              ))}
+            </MaterialSelect>
+          </div>
+        )}
+
+        {!chatgptSelected && msgBox}
+
+        {apiSelected && (
+          <>
+            {field(t('admin.ai.baseUrl'), form.apiKeyConfig.baseUrl, value => setForm(f => ({ ...f, apiKeyConfig: { ...f.apiKeyConfig, baseUrl: value } })), 'text', t('admin.ai.baseUrlPh'))}
+            {field(t('admin.ai.apiKey'), form.apiKeyConfig.apiKey, value => setForm(f => ({ ...f, apiKeyConfig: { ...f.apiKeyConfig, apiKey: value } })), 'password', t('admin.ai.apiKeyPh'))}
+            {field(t('admin.ai.model'), form.apiKeyConfig.model, value => setForm(f => ({ ...f, apiKeyConfig: { ...f.apiKeyConfig, model: value } })), 'text', t('admin.ai.modelPh'))}
+            {config?.provider === AI_PROVIDER_API_KEY && (
+              <MaterialButton variant="outlined" type="button" onClick={handleTest} disabled={testing} style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', padding: '6px 12px', marginBottom: 14, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--text-primary)', cursor: testing ? 'default' : 'pointer', opacity: testing ? 0.6 : 1 }}>
+                {testing ? t('admin.ai.testing') : t('admin.ai.test')}
+              </MaterialButton>
+            )}
+          </>
+        )}
+
+        {chatgptSelected && (
+          <>
+            {field(
+              t('admin.ai.chatgptModel'),
+              form.chatgptConfig.model,
+              value => setForm(f => ({ ...f, chatgptConfig: { ...f.chatgptConfig, model: value } })),
+              'text',
+              t('admin.ai.chatgptModelPh'),
+              <>
+                <a href={OPENAI_MODELS_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>
+                  {t('admin.ai.chatgptModelDocs')}
+                </a>
+              </>,
+            )}
+
+            <div style={{ marginBottom: 14, padding: '12px 14px', borderRadius: 'var(--md-sys-shape-corner-small)', background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'stretch' : 'center', gap: 12, marginBottom: (pendingDevice || msg) ? 12 : 0 }}>
+                <div>
+                  <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)' }}>{t('admin.ai.connectionStatus')}</div>
+                  <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: chatgptConnected ? 'var(--green)' : reconnectRequired ? 'var(--red)' : 'var(--text-primary)', marginTop: 2 }}>{statusLabel}</div>
+                  {chatgptConnected && codexStatus.accountLabel && (
+                    <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>{t('admin.ai.connectedAs', { account: codexStatus.accountLabel })}</div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 8 }}>
+                  {chatgptConnected && (
+                    <MaterialButton variant="outlined" type="button" onClick={handleTest} disabled={testing} style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', padding: '6px 12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--text-primary)', cursor: testing ? 'default' : 'pointer', opacity: testing ? 0.6 : 1 }}>
+                      {testing ? t('admin.ai.testing') : t('admin.ai.test')}
+                    </MaterialButton>
+                  )}
+                  {chatgptConnected ? (
+                    <MaterialButton variant="outlined" type="button" onClick={handleDisconnect} disabled={disconnecting} style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', padding: '6px 12px', background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--red)', cursor: disconnecting ? 'default' : 'pointer', opacity: disconnecting ? 0.6 : 1 }}>
+                      {disconnecting ? t('admin.ai.disconnecting') : t('admin.ai.disconnect')}
+                    </MaterialButton>
+                  ) : !pendingDevice && (
+                    <MaterialButton variant="filled" type="button" onClick={handleConnect} disabled={connecting} style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', padding: '6px 12px', background: 'var(--accent)', border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--accent-text)', cursor: connecting ? 'default' : 'pointer', opacity: connecting ? 0.6 : 1 }}>
+                      {connecting ? t('admin.ai.connecting') : reconnectRequired ? t('admin.ai.reconnect') : t('admin.ai.connect')}
+                    </MaterialButton>
+                  )}
+                </div>
+              </div>
+
+              {msgBox}
+
+              {pendingDevice && (
+                <div style={{ paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 8 }}>{t('admin.ai.deviceInstructions')}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <code style={{ padding: '8px 12px', borderRadius: 'var(--md-sys-shape-corner-small)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: 'var(--md-sys-typescale-body-large-size)', letterSpacing: 1.5, fontWeight: 600 }}>{pendingDevice.userCode}</code>
+                    <MaterialButton variant="outlined" type="button" onClick={handleCopyCode} style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', padding: '6px 10px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--text-primary)', cursor: 'pointer' }}>
+                      {copied ? t('admin.ai.copied') : t('admin.ai.copyCode')}
+                    </MaterialButton>
+                    <a href={pendingDevice.verificationUrl} target="_blank" rel="noreferrer" style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', padding: '6px 10px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--accent)', textDecoration: 'none' }}>
+                      {t('admin.ai.openAuthorization')}
+                    </a>
+                    <MaterialButton variant="outlined" type="button" onClick={handleCancel} disabled={cancelling} style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', padding: '6px 10px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--text-secondary)', cursor: cancelling ? 'default' : 'pointer' }}>
+                      {cancelling ? t('admin.ai.cancelling') : t('common.cancel')}
+                    </MaterialButton>
+                  </div>
+                  <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 8 }}>{t('admin.ai.deviceExpires', { time: formatTime(pendingDevice.expiresAt) })}</div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {(apiSelected || chatgptSelected) && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 8 }}>{t('admin.ai.features')}</div>
+            {toggle(t('admin.ai.featureCompose'), form.features.compose, () => setForm(f => ({ ...f, features: { ...f.features, compose: !f.features.compose } })))}
+            {toggle(t('admin.ai.featureSummarize'), form.features.summarize, () => setForm(f => ({ ...f, features: { ...f.features, summarize: !f.features.summarize } })))}
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', margin: '16px 0 8px' }}>{t('admin.ai.access')}</div>
+            {toggle(t('admin.ai.newUsersEnabled'), form.newUsersEnabled, () => setForm(f => ({ ...f, newUsersEnabled: !f.newUsersEnabled })))}
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: -4, lineHeight: 1.4 }}>{t('admin.ai.newUsersEnabledHint')}</div>
+          </div>
+        )}
+
+        <MaterialButton variant="filled" type="submit" disabled={saving || !formValid}
+          style={{ padding: '8px 18px', background: 'var(--accent)', color: 'var(--accent-text)', border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, cursor: 'pointer', opacity: (saving || !formValid) ? 0.5 : 1 }}>
+          {saving ? t('common.saving') : t('common.save')}
+        </MaterialButton>
+      </form>
+    </div>
+  );
+}
+
+// ─── AI Actions (user-defined custom actions, #202) ───────────────────────────
+function AiActionsTab() {
+  const { t } = useTranslation();
+  const { aiActions, setAiActions } = useStore();
+  const [items, setItems] = useState(() => (aiActions || []).map(a => ({ ...a })));
+  const [aiEnabled, setAiEnabled] = useState(null);
+
+  // Populate once when prefs finish loading, without clobbering in-progress edits.
+  useEffect(() => {
+    if (aiActions && items.length === 0) setItems(aiActions.map(a => ({ ...a })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiActions]);
+  useEffect(() => {
+    api.ai.status().then(s => setAiEnabled(!!s?.enabled)).catch(() => setAiEnabled(false));
+  }, []);
+
+  // Persist only complete, trimmed, bounded actions (mirrors the backend validation).
+  const save = (list) => setAiActions(
+    list.filter(a => a.label.trim() && a.prompt.trim())
+      .map(a => ({ id: a.id, label: a.label.trim().slice(0, AI_ACTION_LIMITS.label), prompt: a.prompt.trim().slice(0, AI_ACTION_LIMITS.prompt) }))
+  );
+
+  const addAction = () => { if (items.length < AI_ACTION_LIMITS.max) setItems([...items, newAiAction('', '')]); };
+  const updateField = (id, field, value) => setItems(items.map(a => a.id === id ? { ...a, [field]: value } : a));
+  const removeAction = (id) => { const next = items.filter(a => a.id !== id); setItems(next); save(next); };
+
+  const inputStyle = {
+    width: '100%', padding: '8px 10px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
+    borderRadius: 6, color: 'var(--text-primary)', fontSize: 13, outline: 'none', boxSizing: 'border-box',
+  };
+
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <p style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.5 }}>
+        {t('admin.aiActions.description')}
+      </p>
+
+      {aiEnabled === false && (
+        <div style={{ padding: '10px 14px', borderRadius: 'var(--md-sys-shape-corner-small)', background: 'var(--bg-secondary)', border: '1px solid var(--border)', fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)', marginBottom: 16 }}>
+          {t('admin.aiActions.aiDisabled')}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {items.map((a) => (
+          <div key={a.id} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', padding: 12 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+              <MaterialInput
+                type="text"
+                value={a.label}
+                maxLength={AI_ACTION_LIMITS.label}
+                placeholder={t('admin.aiActions.labelPh')}
+                onChange={e => updateField(a.id, 'label', e.target.value)}
+                onBlur={() => save(items)}
+                style={{ ...inputStyle, fontWeight: 500 }}
+              />
+              <MaterialButton variant="outlined"
+                onClick={() => removeAction(a.id)}
+                title={t('admin.aiActions.remove')}
+                style={{ flexShrink: 0, padding: '7px 10px', background: 'none', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--red)', cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-small-size)' }}
+              >
+                {t('admin.aiActions.remove')}
+              </MaterialButton>
+            </div>
+            <MaterialTextarea
+              value={a.prompt}
+              maxLength={AI_ACTION_LIMITS.prompt}
+              placeholder={t('admin.aiActions.promptPh')}
+              onChange={e => updateField(a.id, 'prompt', e.target.value)}
+              onBlur={() => save(items)}
+              rows={3}
+              style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+            />
+          </div>
+        ))}
+      </div>
+
+      <MaterialButton variant="filled"
+        onClick={addAction}
+        disabled={items.length >= AI_ACTION_LIMITS.max}
+        style={{ marginTop: 14, padding: '8px 16px', background: 'var(--accent)', color: 'var(--accent-text)', border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, cursor: items.length >= AI_ACTION_LIMITS.max ? 'default' : 'pointer', opacity: items.length >= AI_ACTION_LIMITS.max ? 0.5 : 1 }}
+      >
+        {t('admin.aiActions.add')}
+      </MaterialButton>
+      <div style={{ marginTop: 8, fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)' }}>
+        {t('admin.aiActions.count', { n: items.length, max: AI_ACTION_LIMITS.max })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Categories Section ───────────────────────────────────────────────────────
+function CategoriesSection({ initialSubTab }) {
+  const { t } = useTranslation();
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const { accounts, categorizationEnabled, setCategorizationEnabled } = useStore();
+  const [sources, setSources] = useState([]);
+  const [builtinSets, setBuiltinSets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [manualInput, setManualInput] = useState('');
+  const [urlInput, setUrlInput] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState('');
+  const [msg, setMsg] = useState(null);
+  const [recatAccount, setRecatAccount] = useState('');
+  const [recategorizing, setRecategorizing] = useState(false);
+
+  useEffect(() => {
+    api.categories.getSources()
+      .then(({ sources: s, builtinSets: bs }) => { setSources(s); setBuiltinSets(bs); })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const enabledAccounts = categorizationEnabled ? accounts : accounts.filter(a => a.categorization_enabled);
+  const addedBuiltins = new Set(sources.filter(s => s.source_type === 'builtin').map(s => s.value));
+
+  const handleAddManual = async (e) => {
+    e.preventDefault();
+    if (!manualInput.trim()) return;
+    setAdding(true); setAddError('');
+    try {
+      const { source } = await api.categories.addSource({ sourceType: 'manual', value: manualInput.trim() });
+      setSources(prev => [...prev, source]);
+      setManualInput('');
+      setMsg({ type: 'ok', text: t('admin.categories.addedOk') });
+    } catch (err) { setAddError(err.message); }
+    finally { setAdding(false); }
+  };
+
+  const handleAddBuiltin = async (setName) => {
+    setAdding(true); setAddError('');
+    try {
+      const { source } = await api.categories.addSource({ sourceType: 'builtin', value: setName });
+      setSources(prev => [...prev, source]);
+      setMsg({ type: 'ok', text: t('admin.categories.addedOk') });
+    } catch (err) { setAddError(err.message); }
+    finally { setAdding(false); }
+  };
+
+  const handleAddUrl = async (e) => {
+    e.preventDefault();
+    if (!urlInput.trim()) return;
+    setAdding(true); setAddError('');
+    try {
+      const { source } = await api.categories.addSource({ sourceType: 'url', value: urlInput.trim() });
+      setSources(prev => [...prev, source]);
+      setUrlInput('');
+      setMsg({ type: 'ok', text: t('admin.categories.addedOk') });
+    } catch (err) { setAddError(err.message); }
+    finally { setAdding(false); }
+  };
+
+  const handleToggle = async (id, enabled) => {
+    try {
+      const { source } = await api.categories.toggleSource(id, enabled);
+      setSources(prev => prev.map(s => s.id === id ? source : s));
+    } catch (err) { setMsg({ type: 'error', text: err.message }); }
+  };
+
+  const handleDelete = (id) => setConfirmDialog({
+    title: t('common.delete'), message: t('admin.categories.deleteConfirm'),
+    onConfirm: async () => {
+      await api.categories.deleteSource(id);
+      setSources(prev => prev.filter(s => s.id !== id));
+    },
+  });
+
+  const handleRefresh = async (id) => {
+    try {
+      const { domainCount, error } = await api.categories.refreshSource(id);
+      setSources(prev => prev.map(s => s.id === id ? { ...s, domain_count: domainCount, last_fetched_at: new Date().toISOString() } : s));
+      setMsg(error
+        ? { type: 'error', text: error }
+        : { type: 'ok', text: t('admin.categories.fetchedOk', { count: domainCount }) });
+    } catch (err) { setMsg({ type: 'error', text: err.message }); }
+  };
+
+  const handleRecategorize = async () => {
+    if (!recatAccount) return;
+    setRecategorizing(true);
+    try {
+      await api.categories.recategorize(recatAccount);
+      setMsg({ type: 'ok', text: t('admin.categories.recategorized') });
+    } catch (err) { setMsg({ type: 'error', text: err.message }); }
+    finally { setRecategorizing(false); }
+  };
+
+  const msgBox = msg && (
+    <div style={{ padding: '8px 12px', borderRadius: 'var(--md-sys-shape-corner-small)', marginBottom: 14, fontSize: 'var(--md-sys-typescale-body-medium-size)',
+      background: msg.type === 'ok' ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)',
+      color: msg.type === 'ok' ? 'var(--green)' : 'var(--red)',
+      border: `1px solid ${msg.type === 'ok' ? 'rgba(74,222,128,0.2)' : 'rgba(248,113,113,0.2)'}`,
+    }}>{msg.text}</div>
+  );
+
+  const inputStyle = { width: '100%', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, padding: '7px 10px', color: 'var(--text-primary)', fontSize: 13, boxSizing: 'border-box' };
+
+  if (loading) return <div style={{ color: 'var(--text-tertiary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>{t('common.loading')}</div>;
+
+  return (
+    <div>
+      <ConfirmOverlay dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
+      <div style={{ marginBottom: 20 }}>
+        <ToggleRow label={t('admin.categories.globalEnabled')} desc={t('admin.categories.globalEnabledDesc')}
+          checked={categorizationEnabled} onChange={setCategorizationEnabled} />
+      </div>
+
+      <p style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)', marginTop: 0, marginBottom: 20 }}>
+        {t('admin.categories.description')}
+      </p>
+
+      {msgBox}
+
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: 8 }}>
+        {t('admin.categories.sourcesTitle')}
+      </div>
+      <p style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 0, marginBottom: 14 }}>
+        {t('admin.categories.sourcesDesc')}
+      </p>
+
+      {sources.length > 0 ? (
+        <div style={{ marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {sources.map(s => (
+            <div key={s.id} className="material-category-source">
+              <div className="material-category-source-copy">
+                <div className="material-category-source-name">{s.label || s.value}</div>
+                <div className="material-category-source-meta">
+                  <span style={{ textTransform: 'uppercase' }}>{s.source_type}</span>
+                  {s.source_type === 'url' && s.domain_count != null && (
+                    <span>
+                      {t('admin.categories.domainCount', { count: s.domain_count })}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="material-category-source-actions">
+                {s.source_type === 'url' && (
+                  <MaterialButton type="button" variant="icon" aria-label={t('admin.categories.refresh')} title={t('admin.categories.refresh')} onClick={() => handleRefresh(s.id)}>
+                    <MaterialIcon name="refresh" />
+                  </MaterialButton>
+                )}
+                <MaterialButton type="button" aria-label={s.label || s.value} aria-checked={s.enabled} role="switch" variant="switch" selected={s.enabled} onClick={() => handleToggle(s.id, !s.enabled)} />
+                <MaterialButton variant="icon" onClick={() => handleDelete(s.id)} style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', display: 'flex', padding: 2, flexShrink: 0 }}>
+                  <MaterialIcon name="delete" />
+                </MaterialButton>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', marginBottom: 14 }}>{t('admin.categories.noSources')}</p>
+      )}
+
+      {addError && <p style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--red)', margin: '0 0 8px' }}>{addError}</p>}
+
+      <form onSubmit={handleAddManual} style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+        <MaterialInput value={manualInput} onChange={e => setManualInput(e.target.value)}
+          placeholder={t('admin.categories.addManualPh')} style={{ ...inputStyle, flex: 1 }} />
+        <MaterialButton variant="filled" type="submit" disabled={adding || !manualInput.trim()} style={{
+          padding: '7px 14px', background: 'var(--accent)', border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)',
+          color: 'var(--accent-text)', fontSize: 'var(--md-sys-typescale-body-medium-size)', cursor: 'pointer', opacity: (adding || !manualInput.trim()) ? 0.5 : 1, flexShrink: 0,
+        }}>
+          {t('admin.categories.addBtn')}
+        </MaterialButton>
+      </form>
+
+      {builtinSets.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+          {builtinSets.map(setName => {
+            const isAdded = addedBuiltins.has(setName);
+            return (
+              <MaterialButton variant="text" selected={isAdded} key={setName} onClick={() => !isAdded && handleAddBuiltin(setName)}
+                disabled={adding || isAdded}
+                style={{
+                  padding: '5px 12px', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-small-size)',
+                  cursor: isAdded ? 'default' : 'pointer',
+                  background: isAdded ? 'var(--accent-dim)' : 'var(--bg-tertiary)',
+                  border: `1px solid ${isAdded ? 'var(--accent)' : 'var(--border)'}`,
+                  color: isAdded ? 'var(--accent)' : 'var(--text-secondary)',
+                  opacity: adding && !isAdded ? 0.5 : 1,
+                }}>
+                {setName === 'social_networks' ? t('admin.categories.builtinSocial') : t('admin.categories.builtinDev')}
+                {isAdded ? ' ✓' : ' +'}
+              </MaterialButton>
+            );
+          })}
+        </div>
+      )}
+
+      <form onSubmit={handleAddUrl} style={{ display: 'flex', gap: 6, marginBottom: 24 }}>
+        <MaterialInput value={urlInput} onChange={e => setUrlInput(e.target.value)}
+          placeholder={t('admin.categories.urlSubPh')} style={{ ...inputStyle, flex: 1 }} />
+        <MaterialButton variant="outlined" type="submit" disabled={adding || !urlInput.trim()} style={{
+          padding: '7px 14px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
+          borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--text-secondary)', fontSize: 'var(--md-sys-typescale-body-medium-size)', cursor: 'pointer',
+          opacity: (adding || !urlInput.trim()) ? 0.5 : 1, flexShrink: 0,
+        }}>
+          {t('admin.categories.urlSubBtn')}
+        </MaterialButton>
+      </form>
+
+      {enabledAccounts.length > 0 && (
+        <>
+          <div style={{ height: 1, background: 'var(--border-subtle)', margin: '4px 0 20px' }} />
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: 8 }}>
+            {t('admin.categories.recategorizeTitle')}
+          </div>
+          <p style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 0, marginBottom: 12 }}>
+            {t('admin.categories.recategorizeDesc')}
+          </p>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <MaterialSelect value={recatAccount} onChange={e => setRecatAccount(e.target.value)}
+              style={{ flex: 1, background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', padding: '7px 10px', color: 'var(--text-primary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>
+              <option value="">{t('admin.categories.selectAccount')}</option>
+              {enabledAccounts.map(a => (
+                <option key={a.id} value={a.id}>{a.name} ({a.email_address})</option>
+              ))}
+            </MaterialSelect>
+            <MaterialButton variant="filled" onClick={handleRecategorize} disabled={recategorizing || !recatAccount} style={{
+              padding: '7px 14px', background: 'var(--accent)', border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)',
+              color: 'var(--accent-text)', fontSize: 'var(--md-sys-typescale-body-medium-size)', cursor: 'pointer',
+              opacity: (recategorizing || !recatAccount) ? 0.5 : 1, flexShrink: 0,
+            }}>
+              {recategorizing ? t('admin.categories.recategorizing') : t('admin.categories.recategorize')}
+            </MaterialButton>
+          </div>
+        </>
+      )}
+
+      {/* Plugins that contribute settings under the Categories tab (currently GTD). Rendered only
+          while the plugin is activated; core knows nothing plugin-specific here. */}
+      <PluginSlot name="settings-categories" ctx={{ initialSubTab }} />
+    </div>
+  );
+}
+
+// ─── Plugins Section ──────────────────────────────────────────────────────────
+// Plugins settings tab — lists the plugins registered in this build and lets the user activate/
+// deactivate each for themselves. Activation is per-user (persisted server-side) and independent of
+// a plugin's own per-account config; deactivating hides that plugin's UI and makes it inert.
+function PluginsSection({ onNavigate }) {
+  const { t } = useTranslation();
+  const enabledPlugins = useStore(s => s.enabledPlugins);
+  const setPluginActivated = useStore(s => s.setPluginActivated);
+  const [manifests, setManifests] = useState(null); // null = loading
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api.plugins.list()
+      .then(list => { if (alive) setManifests(Array.isArray(list) ? list : []); })
+      .catch(() => { if (alive) { setManifests([]); setError(true); } });
+    return () => { alive = false; };
+  }, []);
+
+  const toggle = async (id, next) => {
+    setBusyId(id);
+    setError(false);
+    try { await setPluginActivated(id, next); }
+    catch { setError(true); }
+    finally { setBusyId(null); }
+  };
+
+  return (
+    <div>
+      <h2 style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 4px' }}>{t('admin.plugins.title')}</h2>
+      <p style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', margin: '0 0 20px', lineHeight: 1.5 }}>{t('admin.plugins.description')}</p>
+
+      {error && (
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--danger, #d94a4a)', marginBottom: 12 }}>{t('admin.plugins.error')}</div>
+      )}
+      {manifests === null && (
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)' }}>{t('common.loading')}</div>
+      )}
+      {manifests && manifests.length === 0 && !error && (
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)' }}>{t('admin.plugins.empty')}</div>
+      )}
+
+      {manifests && manifests.map(p => {
+        const on = enabledPlugins.includes(p.id);
+        const busy = busyId === p.id;
+        return (
+          <div className="admin-setting-toggle" key={p.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '14px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+            <MaterialButton aria-checked={on} role="switch" variant="switch" selected={on}
+              type="button"
+              onClick={() => toggle(p.id, !on)}
+              disabled={busy}
+              
+              aria-label={p.name}
+              style={{
+                width: 36, height: 20, borderRadius: 'var(--md-sys-shape-corner-medium)', border: 'none', cursor: busy ? 'default' : 'pointer', padding: 0,
+                background: on ? 'var(--accent)' : TOGGLE_OFF_BACKGROUND,
+                position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginTop: 1, opacity: busy ? 0.6 : 1,
+              }}
+            >
+              <span style={{ position: 'absolute', top: 2, left: on ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
+            </MaterialButton>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <span style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-primary)', fontWeight: 500 }}>{p.name}</span>
+                <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)' }}>v{p.version}</span>
+              </div>
+              {(() => {
+                const loc = getPluginMeta(p.id)?.settingsLocation;
+                // Activated + has a settings home → a clickable pointer to it. Activated with no
+                // settings, or not activated → a plain status line.
+                if (on && loc && onNavigate) {
+                  return (
+                    <MaterialButton variant="text"
+                      type="button"
+                      onClick={() => onNavigate(loc.tab, loc.subtab)}
+                      style={{ marginTop: 3, padding: 0, border: 'none', background: 'none', cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--accent)', textAlign: 'left' }}
+                    >
+                      {t('admin.plugins.configureIn', { location: t(loc.labelKey) })} →
+                    </MaterialButton>
+                  );
+                }
+                return (
+                  <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                    {on ? t('admin.plugins.activated') : t('admin.plugins.deactivated')}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── System Email Section ─────────────────────────────────────────────────────
+function SystemEmailSection() {
+  const { t } = useTranslation();
+  const [config, setConfig] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ host: '', port: '587', tls: 'STARTTLS', user: '', pass: '', fromName: 'MailFlow', fromEmail: '' });
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  useEffect(() => {
+    api.admin.getSystemEmail()
+      .then(({ config: cfg }) => {
+        if (cfg) {
+          setConfig(cfg);
+          setForm({ host: cfg.host || '', port: String(cfg.port || 587), tls: cfg.tls || 'STARTTLS', user: cfg.user || '', pass: cfg.pass || '', fromName: cfg.fromName || 'MailFlow', fromEmail: cfg.fromEmail || '' });
+        }
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaving(true); setMsg(null);
+    try {
+      await api.admin.saveSystemEmail(form);
+      setConfig({ ...form });
+      setMsg({ type: 'ok', text: t('admin.systemEmail.saved') });
+    } catch (err) {
+      setMsg({ type: 'error', text: err.message });
+    } finally { setSaving(false); }
+  };
+
+  const handleTest = async () => {
+    setTesting(true); setMsg(null);
+    try {
+      await api.admin.testSystemEmail();
+      setMsg({ type: 'ok', text: t('admin.systemEmail.testOk') });
+    } catch (err) {
+      setMsg({ type: 'error', text: `${t('admin.systemEmail.testFail')}: ${err.message}` });
+    } finally { setTesting(false); }
+  };
+
+  const handleRemove = async () => {
+    await api.admin.deleteSystemEmail();
+    setConfig(null);
+    setForm({ host: '', port: '587', tls: 'STARTTLS', user: '', pass: '', fromName: 'MailFlow', fromEmail: '' });
+    setMsg({ type: 'ok', text: t('admin.systemEmail.removed') });
+  };
+
+  const field = (label, key, type = 'text', placeholder = '') => (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ display: 'block', fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 5 }}>{label}</label>
+      <MaterialInput aria-label={label}
+        type={type}
+        value={form[key]}
+        onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+        placeholder={placeholder}
+        autoComplete={type === 'password' ? 'new-password' : 'off'}
+        style={{ width: '100%', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', padding: '7px 10px', color: 'var(--text-primary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}
+      />
+    </div>
+  );
+
+  if (loading) return <div style={{ color: 'var(--text-tertiary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>{t('common.loading')}</div>;
+
+  return (
+    <div>
+      <p style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)', marginTop: 0, marginBottom: 20 }}>
+        {t('admin.systemEmail.description')}
+      </p>
+
+      {config && (
+        <div style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', padding: '10px 14px', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)' }}>{config.fromName} &lt;{config.fromEmail || config.user}&gt;</div>
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>{config.host}:{config.port} · {config.tls}</div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <MaterialButton variant="outlined" onClick={handleTest} disabled={testing} style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', padding: '5px 12px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+              {testing ? t('admin.systemEmail.testing') : t('admin.systemEmail.test')}
+            </MaterialButton>
+            <MaterialButton variant="outlined" onClick={handleRemove} style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', padding: '5px 12px', background: 'none', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--red)', cursor: 'pointer' }}>
+              {t('common.remove')}
+            </MaterialButton>
+          </div>
+        </div>
+      )}
+
+      <form onSubmit={handleSave}>
+        <div className="admin-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: '0 12px' }}>
+          <div>
+            {field(t('admin.systemEmail.host'), 'host', 'text', 'smtp.example.com')}
+          </div>
+          <div>
+            {field(t('admin.systemEmail.port'), 'port', 'number', '587')}
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ display: 'block', fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 5 }}>{t('admin.systemEmail.encryption')}</label>
+          <MaterialSelect aria-label={t('admin.systemEmail.encryption')} value={form.tls} onChange={e => setForm(f => ({ ...f, tls: e.target.value }))}
+            style={{ width: '100%', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', padding: '7px 10px', color: 'var(--text-primary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>
+            <option value="STARTTLS">STARTTLS (port 587)</option>
+            <option value="SSL">SSL/TLS (port 465)</option>
+            <option value="none">None (port 25)</option>
+          </MaterialSelect>
+        </div>
+
+        {field(t('admin.systemEmail.username'), 'user', 'text', 'noreply@example.com')}
+        {field(t('admin.systemEmail.password'), 'pass', 'password', config ? t('admin.systemEmail.passPlaceholder') : '')}
+
+        <div className="admin-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px' }}>
+          <div>{field(t('admin.systemEmail.fromName'), 'fromName', 'text', 'MailFlow')}</div>
+          <div>{field(t('admin.systemEmail.fromEmail'), 'fromEmail', 'text', t('admin.systemEmail.fromEmailPh'))}</div>
+        </div>
+
+        {msg && (
+          <div style={{ padding: '8px 12px', borderRadius: 'var(--md-sys-shape-corner-small)', marginBottom: 14, fontSize: 'var(--md-sys-typescale-body-medium-size)',
+            background: msg.type === 'ok' ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)',
+            color: msg.type === 'ok' ? 'var(--green)' : 'var(--red)',
+            border: `1px solid ${msg.type === 'ok' ? 'rgba(74,222,128,0.2)' : 'rgba(248,113,113,0.2)'}`,
+          }}>
+            {msg.text}
+          </div>
+        )}
+
+        <MaterialButton variant="filled" type="submit" disabled={saving || !form.host || !form.user}
+          style={{ padding: '8px 18px', background: 'var(--accent)', color: 'var(--accent-text)', border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, cursor: 'pointer', opacity: (saving || !form.host || !form.user) ? 0.5 : 1 }}>
+          {saving ? t('common.saving') : t('common.save')}
+        </MaterialButton>
+      </form>
+    </div>
+  );
+}
+
+// ─── Users Tab ────────────────────────────────────────────────────────────────
+function UsersTab() {
+  const { t } = useTranslation();
+  return (
+    <SubTabs tabs={[
+      { id: 'users', label: t('admin.systemEmail.tabUsers'), content: <UsersAndInvitesPanel /> },
+      { id: 'systememail', label: t('admin.systemEmail.tabEmail'), content: <SystemEmailSection /> },
+    ]} />
+  );
+}
+
+function UsersAndInvitesPanel() {
+  const { t, i18n } = useTranslation();
+  const { user: currentUser, addNotification } = useStore();
+  const [users, setUsers] = useState([]);
+  const [editingUser, setEditingUser] = useState(null);
+  const [userTotal, setUserTotal] = useState(0);
+  const [usersLoadingMore, setUsersLoadingMore] = useState(false);
+  const [invites, setInvites] = useState([]);
+  const [inviteTotal, setInviteTotal] = useState(0);
+  const [invitesLoadingMore, setInvitesLoadingMore] = useState(false);
+  const [regOpen, setRegOpen] = useState(null); // null = loading
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteMsg, setInviteMsg] = useState(null); // { type: 'ok'|'error', text, url? }
+  const [loading, setLoading] = useState(true);
+  const [copiedId, setCopiedId] = useState(null);
+  const [copyFailedId, setCopyFailedId] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
+
+  useEffect(() => {
+    Promise.all([
+      api.admin.getUsers({ limit: 100, offset: 0 }),
+      api.admin.getSettings(),
+      api.admin.getInvites({ limit: 100, offset: 0 }),
+    ]).then(([usersData, settingsData, invitesData]) => {
+      setUsers(usersData.users);
+      setUserTotal(usersData.total);
+      setRegOpen(settingsData.settings.registration_open === 'true');
+      setInvites(invitesData.invites);
+      setInviteTotal(invitesData.total);
+    }).catch(console.error).finally(() => setLoading(false));
+  }, []);
+
+  const handleLoadMoreUsers = async () => {
+    setUsersLoadingMore(true);
+    try {
+      const data = await api.admin.getUsers({ limit: 100, offset: users.length });
+      setUsers(prev => [...prev, ...data.users]);
+      setUserTotal(data.total);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setUsersLoadingMore(false);
+    }
+  };
+
+  const handleLoadMoreInvites = async () => {
+    setInvitesLoadingMore(true);
+    try {
+      const data = await api.admin.getInvites({ limit: 100, offset: invites.length });
+      setInvites(prev => [...prev, ...data.invites]);
+      setInviteTotal(data.total);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setInvitesLoadingMore(false);
+    }
+  };
+
+  const handleToggleAdmin = async (u) => {
+    const newVal = !u.isAdmin;
+    await api.admin.updateUser(u.id, { isAdmin: newVal });
+    setUsers(us => us.map(x => x.id === u.id ? { ...x, isAdmin: newVal } : x));
+  };
+
+  // Per-user AI access (#644). The server reads it on every AI request, so it applies at once.
+  const handleToggleAi = async (u) => {
+    const newVal = u.aiEnabled === false;
+    try {
+      await api.admin.updateUser(u.id, { aiEnabled: newVal });
+    } catch (err) {
+      addNotification({ type: 'error', title: t('admin.users.aiToggleFailed', { username: u.username }), body: err.message });
+      return;
+    }
+    setUsers(us => us.map(x => x.id === u.id ? { ...x, aiEnabled: newVal } : x));
+  };
+
+  const handleDeleteUser = (u) => {
+    setConfirmDialog({
+      title: t('admin.users.deleteConfirmTitle', { username: u.username }),
+      message: t('admin.users.deleteConfirmBody'),
+      confirmLabel: t('admin.users.deleteConfirmLabel'),
+      onConfirm: async () => {
+        await api.admin.deleteUser(u.id);
+        setUsers(us => us.filter(x => x.id !== u.id));
+      },
+    });
+  };
+
+  const handleDisableTotp = (u) => {
+    setConfirmDialog({
+      title: t('admin.users.disable2faConfirmTitle', { username: u.username }),
+      message: t('admin.users.disable2faConfirmBody'),
+      confirmLabel: t('admin.users.disable2faConfirmLabel'),
+      onConfirm: async () => {
+        await api.admin.disableUserTotp(u.id);
+        setUsers(us => us.map(x => x.id === u.id ? { ...x, totpEnabled: false } : x));
+      },
+    });
+  };
+
+  const handleToggleReg = async () => {
+    const newVal = !regOpen;
+    await api.admin.updateSettings({ registration_open: newVal });
+    setRegOpen(newVal);
+  };
+
+  const handleSendInvite = async () => {
+    if (!inviteEmail.includes('@')) return;
+    setInviteLoading(true);
+    setInviteMsg(null);
+    try {
+      const data = await api.admin.createInvite(inviteEmail);
+      setInviteEmail('');
+      if (data.emailSent) {
+        setInviteMsg({ type: 'ok', text: t('admin.users.inviteSent', { email: inviteEmail }), url: data.inviteUrl });
+      } else {
+        setInviteMsg({ type: 'ok', text: t('admin.users.inviteCreatedNoEmail'), url: data.inviteUrl });
+      }
+      // Reload invites from offset 0 to get proper data including the new entry
+      api.admin.getInvites({ limit: 100, offset: 0 }).then(d => {
+        setInvites(d.invites);
+        setInviteTotal(d.total);
+      }).catch(() => {});
+    } catch (err) {
+      setInviteMsg({ type: 'error', text: err.message });
+    } finally {
+      setInviteLoading(false);
+    }
+  };
+
+  const handleRevokeInvite = async (id) => {
+    await api.admin.deleteInvite(id);
+    setInvites(inv => inv.filter(i => i.id !== id));
+  };
+
+  const copyInviteUrl = async (url, id) => {
+    const { ok } = await copyToClipboard(url);
+    setCopiedId(ok ? id : null);
+    setCopyFailedId(ok ? null : id);
+    setTimeout(() => { setCopiedId(null); setCopyFailedId(null); }, 2000);
+  };
+
+  if (loading) {
+    return <div style={{ color: 'var(--text-tertiary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>{t('common.loading')}</div>;
+  }
+
+  const pendingInvites = invites.filter(i => !i.used_at && new Date(i.expires_at) > new Date());
+  const usedOrExpiredInvites = invites.filter(i => i.used_at || new Date(i.expires_at) <= new Date());
+
+  return (
+    <>
+    <div>
+      {/* ── Users ── */}
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+        {t('admin.users.title')}
+      </div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', marginBottom: 16 }}>
+        {t('admin.users.description')}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 28 }}>
+        {users.map(u => (
+          <div key={u.id} style={{
+            // On a phone the actions wrap below the name rather than squeezing it to nothing. The
+            // name column's 120px basis still fits the widest row (switch, edit, admin, 2FA,
+            // delete) on one line at the desktop settings width.
+            display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10,
+            padding: '10px 12px', borderRadius: 'var(--md-sys-shape-corner-small)',
+            background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
+          }}>
+            <div style={{
+              width: 32, height: 32, borderRadius: '50%', flexShrink: 0, overflow: 'hidden',
+              background: u.isAdmin ? 'var(--accent)' : 'var(--bg-elevated)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: u.isAdmin ? 'var(--md-sys-color-on-primary)' : 'var(--text-secondary)',
+              border: u.isAdmin ? '2px solid var(--accent)' : '1px solid var(--border)',
+            }}>
+              {u.avatar
+                ? <img src={u.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                : u.username[0].toUpperCase()}
+            </div>
+
+            <div style={{ flex: '1 1 120px', minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                <span style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)', minWidth: 0, overflowWrap: 'anywhere' }}>
+                  {u.username}
+                </span>
+                {u.isAdmin && (
+                  <span style={{
+                    fontSize: 'var(--md-sys-typescale-body-small-size)', padding: '2px 6px', borderRadius: 'var(--md-sys-shape-corner-extra-large)',
+                    background: 'rgba(124,106,247,0.15)', color: 'var(--accent)',
+                    border: '1px solid rgba(124,106,247,0.25)', fontWeight: 600,
+                    letterSpacing: '0.04em', textTransform: 'uppercase',
+                  }}>
+                    {t('admin.users.adminBadge')}
+                  </span>
+                )}
+                {u.id === currentUser?.id && (
+                  <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)' }}>{t('admin.users.you')}</span>
+                )}
+              </div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 1 }}>
+                {t('admin.users.joined', { date: formatDay(u.created_at) })}
+              </div>
+              {/* Last request, not last login: sessions roll, so a daily user rarely logs in. */}
+              <div
+                title={u.lastSeenAt ? formatDateTime(u.lastSeenAt) : undefined}
+                style={{
+                  fontSize: 'var(--md-sys-typescale-body-small-size)', marginTop: 1,
+                  color: u.lastSeenAt && daysSince(u.lastSeenAt) > 90 ? 'var(--amber)' : 'var(--text-tertiary)',
+                }}
+              >
+                {u.lastSeenAt
+                  ? t('admin.users.lastSeen', { when: formatRelativeTime(u.lastSeenAt, htmlLang(i18n.language)) })
+                  : t('admin.users.neverSeen')}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto', flexShrink: 0 }}>
+              {/* Shown for every user, the admin included: AI may run on the admin's own subscription. */}
+              <MaterialButton variant="switch"
+                type="button"
+                role="switch"
+                aria-checked={u.aiEnabled !== false}
+                aria-label={t('admin.users.aiAccessLabel', { username: u.username })}
+                onClick={() => handleToggleAi(u)}
+                title={u.aiEnabled !== false ? t('admin.users.aiOnHint') : t('admin.users.aiOffHint')}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
+                  padding: '5px 8px', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 500,
+                  border: '1px solid var(--border)', background: 'transparent',
+                  color: u.aiEnabled !== false ? 'var(--text-secondary)' : 'var(--text-tertiary)', cursor: 'pointer',
+                }}
+              >
+                <span aria-hidden="true" style={{
+                  width: 24, height: 14, borderRadius: 'var(--md-sys-shape-corner-small)', position: 'relative', flexShrink: 0,
+                  background: u.aiEnabled !== false ? 'var(--accent)' : 'var(--border)', transition: 'background 0.2s',
+                }}>
+                  <span style={{
+                    position: 'absolute', top: 2, left: u.aiEnabled !== false ? 12 : 2, width: 10, height: 10,
+                    borderRadius: '50%', background: '#fff', transition: 'left 0.2s',
+                  }} />
+                </span>
+              </MaterialButton>
+              <span data-ai-state-label>{u.aiEnabled !== false ? t('admin.users.aiOn') : t('admin.users.aiOff')}</span>
+
+              <IconBtn onClick={() => setEditingUser(u)} title={t('admin.users.edit')}>
+                <MaterialIcon name="edit" />
+              </IconBtn>
+
+              {u.id !== currentUser?.id && (
+                <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+                  <MaterialButton variant="outlined"
+                    onClick={() => handleToggleAdmin(u)}
+                    title={u.isAdmin ? t('admin.users.removeAdmin') : t('admin.users.makeAdmin')}
+                    style={{
+                      padding: '5px 10px', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 500,
+                      border: '1px solid var(--border)',
+                      background: u.isAdmin ? 'var(--bg-elevated)' : 'transparent',
+                      color: u.isAdmin ? 'var(--text-secondary)' : 'var(--accent)',
+                      cursor: 'pointer', transition: 'all 0.1s',
+                    }}
+                    
+                    
+                  >
+                    {u.isAdmin ? t('admin.users.removeAdmin') : t('admin.users.makeAdmin')}
+                  </MaterialButton>
+                  {u.totpEnabled && (
+                    <IconBtn onClick={() => handleDisableTotp(u)} title={t('admin.users.disable2fa')}>
+                      <MaterialIcon name="lock" />
+                    </IconBtn>
+                  )}
+                  <IconBtn onClick={() => handleDeleteUser(u)} title={t('admin.users.deleteUser')} danger>
+                    <MaterialIcon name="delete" />
+                  </IconBtn>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        {users.length < userTotal && (
+          <MaterialButton variant="outlined"
+            onClick={handleLoadMoreUsers}
+            disabled={usersLoadingMore}
+            style={{
+              marginTop: 4, padding: '7px 14px', background: 'var(--bg-tertiary)',
+              border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)',
+              color: 'var(--text-secondary)', fontSize: 'var(--md-sys-typescale-body-small-size)',
+              cursor: usersLoadingMore ? 'not-allowed' : 'pointer',
+              opacity: usersLoadingMore ? 0.6 : 1, alignSelf: 'flex-start',
+            }}
+          >
+            {usersLoadingMore ? t('common.loading') : t('common.loadMore')}
+          </MaterialButton>
+        )}
+      </div>
+
+      {/* ── Registration ── */}
+      <div style={{ height: 1, background: 'var(--border-subtle)', marginBottom: 20 }} />
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+        {t('admin.users.registrationOpen')}
+      </div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', marginBottom: 12 }}>
+        {t('admin.users.registrationOpenDesc')}
+      </div>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '12px 14px', borderRadius: 'var(--md-sys-shape-corner-small)',
+        background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
+        marginBottom: 28,
+      }}>
+        <div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)' }}>
+            {regOpen ? t('admin.users.registrationIsOpen') : t('admin.users.registrationIsClosed')}
+          </div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>
+            {regOpen ? t('admin.users.registrationStatusOpen') : t('admin.users.registrationStatusClosed')}
+          </div>
+        </div>
+        <MaterialButton aria-label={t('admin.users.registrationIsOpen')} aria-checked={regOpen} role="switch" variant="switch" selected={regOpen}
+          onClick={handleToggleReg}
+          style={{
+            width: 44, height: 24, borderRadius: 'var(--md-sys-shape-corner-medium)',
+            background: regOpen ? 'var(--accent)' : TOGGLE_OFF_BACKGROUND,
+            border: `1px solid ${regOpen ? 'var(--accent)' : 'var(--border)'}`,
+            cursor: 'pointer', position: 'relative', transition: 'all 0.2s',
+            flexShrink: 0,
+          }}
+        >
+          <div style={{
+            position: 'absolute', top: 3, left: regOpen ? 22 : 3,
+            width: 16, height: 16, borderRadius: '50%',
+            background: 'white', transition: 'left 0.2s',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+          }} />
+        </MaterialButton>
+      </div>
+
+      {/* ── Invite ── */}
+      <div style={{ height: 1, background: 'var(--border-subtle)', marginBottom: 20 }} />
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+        {t('admin.users.inviteTitle')}
+      </div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', marginBottom: 12 }}>
+        {t('admin.users.inviteDescription')}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <MaterialInput
+          type="email"
+          value={inviteEmail}
+          onChange={e => setInviteEmail(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleSendInvite()}
+          placeholder={t('admin.users.invitePh')}
+          style={{ ...inputStyle, flex: 1 }}
+          
+          
+        />
+        <MaterialButton variant="filled"
+          onClick={handleSendInvite}
+          disabled={inviteLoading || !inviteEmail.includes('@')}
+          style={{
+            padding: '9px 16px', background: 'var(--accent)',
+            border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--accent-text)',
+            fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, cursor: inviteLoading ? 'not-allowed' : 'pointer',
+            opacity: inviteLoading || !inviteEmail.includes('@') ? 0.6 : 1,
+            flexShrink: 0,
+          }}
+        >
+          {inviteLoading ? t('admin.users.inviteSending') : t('admin.users.inviteSend')}
+        </MaterialButton>
+      </div>
+
+      {inviteMsg && (
+        <div style={{
+          padding: '10px 14px', borderRadius: 'var(--md-sys-shape-corner-small)', marginBottom: 12, fontSize: 'var(--md-sys-typescale-body-medium-size)',
+          background: inviteMsg.type === 'error' ? 'rgba(248,113,113,0.1)' : 'rgba(74,222,128,0.1)',
+          border: `1px solid ${inviteMsg.type === 'error' ? 'rgba(248,113,113,0.3)' : 'rgba(74,222,128,0.2)'}`,
+          color: inviteMsg.type === 'error' ? 'var(--red)' : 'var(--green)',
+        }}>
+          {inviteMsg.text}
+          {inviteMsg.url && inviteMsg.type === 'ok' && (
+            <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <code style={{
+                fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', fontFamily: 'JetBrains Mono, monospace',
+                background: 'var(--bg-tertiary)', padding: '3px 6px', borderRadius: 'var(--md-sys-shape-corner-extra-small)',
+                flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                display: 'block',
+              }}>
+                {inviteMsg.url}
+              </code>
+              <MaterialButton variant="outlined"
+                onClick={() => copyInviteUrl(inviteMsg.url, 'new')}
+                style={{
+                  padding: '4px 10px', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-small-size)',
+                  background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
+                  color: 'var(--text-secondary)', cursor: 'pointer', flexShrink: 0,
+                }}
+              >
+                {copiedId === 'new' ? t('admin.users.inviteCopied')
+                  : copyFailedId === 'new' ? t('common.copyFailed')
+                    : t('common.copy')}
+              </MaterialButton>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Pending invites */}
+      {pendingInvites.length > 0 && (
+        <>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8, marginTop: 16 }}>
+            {t('admin.users.pendingInvites')}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {pendingInvites.map(inv => {
+              const invUrl = `${window.location.origin}/register?invite=${inv.token}`;
+              return (
+                <div key={inv.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 12px', borderRadius: 'var(--md-sys-shape-corner-small)',
+                  background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-primary)', fontWeight: 500 }}>
+                      {inv.email}
+                    </div>
+                    <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 1 }}>
+                      {t('admin.users.inviteExpires', { date: formatDay(inv.expires_at) })}
+                    </div>
+                  </div>
+                  <MaterialButton variant="text"
+                    onClick={() => copyInviteUrl(invUrl, inv.id)}
+                    title={t('admin.users.inviteCopy')}
+                    style={{
+                      padding: '4px 10px', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-small-size)',
+                      background: copiedId === inv.id ? 'rgba(74,222,128,0.1)' : 'var(--bg-elevated)',
+                      border: `1px solid ${copiedId === inv.id ? 'rgba(74,222,128,0.3)' : 'var(--border)'}`,
+                      color: copiedId === inv.id ? 'var(--green)' : 'var(--text-secondary)',
+                      cursor: 'pointer', flexShrink: 0, transition: 'all 0.15s',
+                    }}
+                  >
+                    {copiedId === inv.id ? t('admin.users.inviteCopied')
+                      : copyFailedId === inv.id ? t('common.copyFailed')
+                        : t('admin.users.inviteCopy')}
+                  </MaterialButton>
+                  <IconBtn onClick={() => handleRevokeInvite(inv.id)} title={t('admin.users.inviteRevoke')} danger>
+                    <MaterialIcon name="close" />
+                  </IconBtn>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* Used/expired invites */}
+      {usedOrExpiredInvites.length > 0 && (
+        <>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8, marginTop: 16 }}>
+            {t('admin.users.usedInvites')}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {usedOrExpiredInvites.map(inv => (
+              <div key={inv.id} style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '8px 12px', borderRadius: 'var(--md-sys-shape-corner-small)',
+                background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
+                opacity: 0.6,
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)', fontWeight: 500 }}>
+                    {inv.email}
+                  </div>
+                  <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 1 }}>
+                    {inv.used_at
+                      ? t('admin.users.inviteUsedBy', { username: inv.used_by_username || 'unknown', date: formatDay(inv.used_at) })
+                      : t('admin.users.inviteExpired', { date: formatDay(inv.expires_at) })}
+                  </div>
+                </div>
+                <IconBtn onClick={() => handleRevokeInvite(inv.id)} title={t('admin.users.inviteDelete')} danger>
+                  <MaterialIcon name="delete" />
+                </IconBtn>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      {invites.length < inviteTotal && (
+        <MaterialButton variant="outlined"
+          onClick={handleLoadMoreInvites}
+          disabled={invitesLoadingMore}
+          style={{
+            marginTop: 12, padding: '7px 14px', background: 'var(--bg-tertiary)',
+            border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)',
+            color: 'var(--text-secondary)', fontSize: 'var(--md-sys-typescale-body-small-size)',
+            cursor: invitesLoadingMore ? 'not-allowed' : 'pointer',
+            opacity: invitesLoadingMore ? 0.6 : 1,
+          }}
+        >
+          {invitesLoadingMore ? t('common.loading') : t('common.loadMore')}
+        </MaterialButton>
+      )}
+      <ConfirmOverlay dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
+      {editingUser && (
+        <AdminUserEditor
+          user={editingUser}
+          isSelf={editingUser.id === currentUser?.id}
+          onClose={() => setEditingUser(null)}
+          onChanged={updated => {
+            setUsers(us => us.map(x => (x.id === updated.id ? { ...x, ...updated } : x)));
+            setEditingUser(updated);
+          }}
+          onSaved={updated => {
+            setUsers(us => us.map(x => (x.id === updated.id ? { ...x, ...updated } : x)));
+            setEditingUser(null);
+          }}
+        />
+      )}
+    </div>
+    </>
+  );
+}
+
+// ─── Push Notifications Section (inside NotificationsTab) ─────────────────────
+function PushNotificationsSection() {
+  const { t } = useTranslation();
+  const {
+    supported, permission, subscribed, serverConfigured, loading,
+    subscribe, unsubscribe,
+  } = usePushNotifications();
+
+  // Detect iOS devices that need to be installed as a PWA before push works.
+  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isStandalone = window.navigator.standalone === true ||
+    window.matchMedia('(display-mode: standalone)').matches;
+  const showIOSHint = isIOS && !isStandalone;
+
+  const handleToggle = async () => {
+    if (subscribed) {
+      await unsubscribe();
+    } else {
+      await subscribe();
+    }
+  };
+
+  // Status badge colour and label
+  let statusColor = 'var(--text-tertiary)';
+  let statusLabel = t('admin.push.statusOff');
+  if (subscribed) {
+    statusColor = 'var(--green, #22c55e)';
+    statusLabel = t('admin.push.statusOn');
+  } else if (permission === 'denied') {
+    statusColor = 'var(--red)';
+    statusLabel = t('admin.push.statusDenied');
+  }
+
+  return (
+    <div style={{ marginTop: 32 }}>
+      {/* Divider */}
+      <div style={{ height: 1, background: 'var(--border-subtle)', marginBottom: 24 }} />
+
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+        {t('admin.push.title')}
+      </div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', marginBottom: 20 }}>
+        {t('admin.push.description')}
+      </div>
+
+      {/* Server not configured */}
+      {serverConfigured === false && (
+        <div style={{
+          padding: '12px 16px', borderRadius: 'var(--md-sys-shape-corner-small)',
+          background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+          fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)',
+        }}>
+          {t('admin.push.notConfigured')}
+        </div>
+      )}
+
+      {/* Browser not supported */}
+      {serverConfigured !== false && !supported && (
+        <div style={{
+          padding: '12px 16px', borderRadius: 'var(--md-sys-shape-corner-small)',
+          background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+          fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)',
+        }}>
+          {t('admin.push.notSupported')}
+        </div>
+      )}
+
+      {/* iOS not-installed hint */}
+      {serverConfigured !== false && supported && showIOSHint && !subscribed && (
+        <div style={{
+          padding: '12px 16px', borderRadius: 'var(--md-sys-shape-corner-small)',
+          background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+          borderLeft: '3px solid var(--accent)',
+          fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)', marginBottom: 16,
+        }}>
+          {t('admin.push.iosHint')}
+        </div>
+      )}
+
+      {/* Main toggle row */}
+      {serverConfigured !== false && supported && !showIOSHint && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '14px 16px', borderRadius: 'var(--md-sys-shape-corner-medium)',
+          background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
+        }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+              <div style={{ width: 7, height: 7, borderRadius: '50%', background: statusColor, flexShrink: 0 }} />
+              <span style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)' }}>
+                {statusLabel}
+              </span>
+            </div>
+            {permission === 'denied' && (
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', maxWidth: 340 }}>
+                {t('admin.push.permissionDenied')}
+              </div>
+            )}
+          </div>
+
+          {permission !== 'denied' && (
+            <MaterialButton variant="filled"
+              onClick={handleToggle}
+              disabled={loading}
+              style={{
+                padding: '7px 16px', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
+                cursor: loading ? 'wait' : 'pointer',
+                background: subscribed ? 'transparent' : 'var(--accent)',
+                color: subscribed ? 'var(--text-secondary)' : 'white',
+                border: subscribed ? '1px solid var(--border)' : '1px solid transparent',
+                opacity: loading ? 0.6 : 1,
+                transition: 'all 0.15s',
+              }}
+            >
+              {loading
+                ? t('admin.push.loading')
+                : subscribed
+                  ? t('admin.push.disable')
+                  : t('admin.push.enable')}
+            </MaterialButton>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Notifications Tab ────────────────────────────────────────────────────────
+function NotificationsTab() {
+  const { t } = useTranslation();
+  const { notificationSound, setNotificationSound, customSoundDataUrl, setCustomSoundDataUrl,
+          showAppBadge, setShowAppBadge, showFaviconBadge, setShowFaviconBadge } = useStore();
+  const fileInputRef = useRef(null);
+  const [customFileName, setCustomFileName] = useState(
+    () => localStorage.getItem('mailflow_custom_sound_name') || ''
+  );
+  const [uploadError, setUploadError] = useState('');
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploadError('');
+    if (file.size > 2 * 1024 * 1024) {
+      setUploadError(t('admin.notifications.uploadError'));
+      e.target.value = '';
+      return;
+    }
+    // Unlock AudioContext while we're inside a user-gesture handler.
+    warmUpAudioContext();
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target.result;
+      setCustomSoundDataUrl(dataUrl);
+      setCustomFileName(file.name);
+      localStorage.setItem('mailflow_custom_sound_name', file.name);
+      setNotificationSound('custom');
+      // Preview immediately so the user knows it worked.
+      playCustomSound(dataUrl);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const items = [
+    { id: 'none', label: t('admin.notifications.none'), description: t('admin.notifications.noneDesc') },
+    ...Object.entries(NOTIFICATION_SOUNDS).map(([id, s]) => ({ id, ...s })),
+  ];
+
+  const previewSound = () => playNotificationSound(notificationSound, customSoundDataUrl);
+  const soundDescription = notificationSound === 'custom'
+    ? customFileName || t('admin.notifications.customUpload')
+    : items.find(item => item.id === notificationSound)?.description;
+
+  return (
+    <div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+        {t('admin.notifications.title')}
+      </div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', marginBottom: 20 }}>
+        {t('admin.notifications.description')}
+      </div>
+
+      <div className="md-sound-options">
+        <label className="md-field-label" htmlFor="notification-sound">{t('admin.search.notificationSound')}</label>
+        <MaterialSelect id="notification-sound" aria-describedby="notification-sound-description" value={notificationSound}
+          onChange={event => { const id = event.target.value; setNotificationSound(id); playNotificationSound(id, customSoundDataUrl); }}>
+          <option value="none">{t('admin.notifications.none')}</option>
+          <optgroup label={t('admin.notifications.builtin')}>
+            {items.filter(item => item.id !== 'none').map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+          </optgroup>
+          <optgroup label={t('admin.notifications.custom')}>
+            <option value="custom" disabled={!customSoundDataUrl}>{customFileName || t('admin.notifications.customUpload')}</option>
+          </optgroup>
+        </MaterialSelect>
+        <p id="notification-sound-description" className="md-supporting-text">{soundDescription}</p>
+        <div className="md-sound-actions">
+          <MaterialButton type="button" variant="outlined" onClick={previewSound}
+            disabled={notificationSound === 'none' || (notificationSound === 'custom' && !customSoundDataUrl)}>
+            <MaterialIcon name="volume_up" />{t('admin.notifications.preview')}
+          </MaterialButton>
+          <MaterialInput ref={fileInputRef} type="file" accept="audio/*" style={{ display: 'none' }} onChange={handleFileUpload} />
+          <MaterialButton type="button" variant="outlined" onClick={() => fileInputRef.current?.click()}>
+            <MaterialIcon name="upload" />{customFileName ? t('admin.notifications.customChange') : t('admin.notifications.customButton')}
+          </MaterialButton>
+        </div>
+        {uploadError && <p role="alert" className="md-supporting-text" style={{ color: 'var(--md-sys-color-error)' }}>{uploadError}</p>}
+      </div>
+
+      {/* Unread Badges */}
+      <div style={{ marginTop: 32 }}>
+        <div style={{ height: 1, background: 'var(--border-subtle)', marginBottom: 24 }} />
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+          {t('admin.notifications.badgeTitle')}
+        </div>
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', marginBottom: 16 }}>
+          {t('admin.notifications.badgeDescription')}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {[
+            { label: t('admin.notifications.appBadge'), desc: t('admin.notifications.appBadgeDesc'), value: showAppBadge, set: setShowAppBadge },
+            { label: t('admin.notifications.faviconBadge'), desc: t('admin.notifications.faviconBadgeDesc'), value: showFaviconBadge, set: setShowFaviconBadge },
+          ].map(({ label, desc, value, set: setter }) => (
+            <div key={label} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '12px 16px', borderRadius: 'var(--md-sys-shape-corner-medium)',
+              background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
+            }}>
+              <div>
+                <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)', marginBottom: 2 }}>{label}</div>
+                <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)' }}>{desc}</div>
+              </div>
+              <MaterialButton variant="text" selected={value}
+                onClick={() => setter(!value)}
+                style={{
+                  padding: '6px 14px', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
+                  cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0, marginLeft: 16,
+                  background: value ? 'var(--accent)' : 'transparent',
+                  color: value ? 'white' : 'var(--text-secondary)',
+                  border: value ? '1px solid transparent' : '1px solid var(--border)',
+                }}
+              >
+                {value ? t('admin.notifications.badgeOn') : t('admin.notifications.badgeOff')}
+              </MaterialButton>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Push Notifications */}
+      <PushNotificationsSection />
+      <PushPrioritiesSection />
+    </div>
+  );
+}
+
+// ─── Shared confirm overlay (replaces window.confirm everywhere) ──────────────
+function ConfirmOverlay({ dialog, onClose }) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const dialogRef = useModalFocus({ enabled: !!dialog, onEscape: () => { if (!busy) onClose(); } });
+
+  // Clear transient state whenever a different dialog is opened, so a previous
+  // failure never leaks into the next confirmation.
+  useEffect(() => { setBusy(false); setError(''); }, [dialog]);
+
+  if (!dialog) return null;
+
+  // Await the action rather than firing it into the void. This previously closed the
+  // overlay and then called onConfirm() unawaited with no catch, so a rejected request
+  // left no trace at all: the dialog was already gone and the rejection was unhandled.
+  // Every destructive action here (delete account, delete alias, delete user, disable
+  // a user's 2FA, delete an SSO provider, unlink an identity) therefore looked like it
+  // had succeeded while the server had refused it. Keep the dialog open on failure so
+  // the error is shown where the user is already looking; close only on success.
+  const runConfirm = async () => {
+    setError('');
+    setBusy(true);
+    try {
+      await dialog.onConfirm();
+      onClose();
+    } catch (err) {
+      setError(err?.message || String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9100,
+      background: 'rgba(0,0,0,0.55)',
+       WebkitBackdropFilter: 'blur(8px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 24,
+      animation: 'backdrop-enter var(--motion-fast) var(--ease-standard) both',
+    }} onClick={busy ? undefined : onClose}>
+      <div ref={dialogRef} role="alertdialog" aria-modal="true" aria-label={dialog.title} className="material-modal" style={{
+        background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
+        borderRadius: 'var(--md-sys-shape-corner-medium)', padding: '24px 24px 20px', maxWidth: 360, width: '100%',
+        boxShadow: 'var(--shadow-modal)',
+        animation: 'modal-enter var(--motion-normal) var(--ease-emphasized) backwards',
+      }} onClick={e => e.stopPropagation()}>
+        <p style={{ margin: '0 0 8px', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)' }}>
+          {dialog.title}
+        </p>
+        <p style={{ margin: '0 0 20px', fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+          {dialog.message}
+        </p>
+        {error && (
+          <div role="alert" style={{
+            marginBottom: 14, padding: '8px 10px',
+            background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)',
+            borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--red)', fontSize: 'var(--md-sys-typescale-body-small-size)',
+          }}>{t('common.error', { message: error })}</div>
+        )}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <MaterialButton variant="outlined" onClick={onClose} disabled={busy} className="btn-press" style={{
+            padding: '7px 16px', borderRadius: 'var(--md-sys-shape-corner-small)', border: '1px solid var(--border-subtle)',
+            background: 'transparent', color: 'var(--text-secondary)',
+            cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.5 : 1, fontSize: 'var(--md-sys-typescale-body-medium-size)',
+          }}>{t('common.cancel')}</MaterialButton>
+          <MaterialButton variant="text" onClick={runConfirm} disabled={busy} className="btn-press" style={{
+            padding: '7px 16px', borderRadius: 'var(--md-sys-shape-corner-small)', border: 'none',
+            background: '#dc2626', color: 'white',
+            cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.7 : 1, fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
+          }}>{busy ? t('common.loading') : (dialog.confirmLabel || t('common.delete'))}</MaterialButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Language Tab ─────────────────────────────────────────────────────────────
+const LANGUAGES = [
+  { code: 'en', nativeName: 'English' },
+  { code: 'de', nativeName: 'Deutsch' },
+  { code: 'fr', nativeName: 'Français' },
+  { code: 'es', nativeName: 'Español' },
+  { code: 'it', nativeName: 'Italiano' },
+  { code: 'ru', nativeName: 'Русский' },
+  { code: 'zhCN', nativeName: '简体中文'},
+  { code: 'pl', nativeName: 'Polski' },
+  { code: 'cs', nativeName: 'Čeština' },
+  { code: 'ptBR', nativeName: 'Português (Brasil)' },
+  { code: 'ko', nativeName: '한국어' },
+];
+
+function LanguageTab() {
+  const { t } = useTranslation();
+  const { language, setLanguage } = useStore();
+
+  return (
+    <div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+        {t('admin.appearance.language')}
+      </div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', marginBottom: 20 }}>
+        {t('admin.appearance.languageDescription')}
+      </div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {LANGUAGES.map(({ code, nativeName }) => {
+          const isActive = language === code;
+          return (
+            <MaterialButton selected={isActive} aria-pressed={Boolean(isActive)} variant="text"
+              key={code}
+              onClick={() => setLanguage(code)}
+              style={{
+                background: isActive ? 'var(--bg-hover)' : 'var(--bg-tertiary)',
+                border: `2px solid ${isActive ? 'var(--accent)' : 'var(--border-subtle)'}`,
+                borderRadius: 'var(--md-sys-shape-corner-medium)', padding: '10px 18px', cursor: 'pointer',
+                transition: 'all 0.15s', outline: 'none',
+                display: 'flex', alignItems: 'center', gap: 10,
+              }}
+              
+              
+            >
+              <span style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)' }}>{nativeName}</span>
+              {isActive && (
+                <div style={{
+                  width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                  background: 'var(--accent)', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <MaterialIcon name="check" />
+                </div>
+              )}
+            </MaterialButton>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Sub-tab navigator (reusable within a top-level tab panel) ───────────────
+function SubTabs({ tabs, initialTab }) {
+  const [active, setActive] = useState(initialTab || tabs[0].id);
+  const id = useId();
+  const { t } = useTranslation();
+  const onKeyDown = event => {
+    const buttons = [...event.currentTarget.querySelectorAll('[role="tab"]')];
+    const at = buttons.indexOf(document.activeElement);
+    let next;
+    if (event.key === 'ArrowRight') next = (at + 1) % buttons.length;
+    else if (event.key === 'ArrowLeft') next = (at - 1 + buttons.length) % buttons.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = buttons.length - 1;
+    if (next !== undefined) {
+      event.preventDefault(); event.stopPropagation();
+      setActive(tabs[next].id);
+      buttons[next].focus();
+      buttons[next].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+  };
+  return (
+    <div>
+      <div className="admin-subtabs" role="tablist" aria-label={t('admin.title')} onKeyDown={onKeyDown} style={{
+        display: 'flex', gap: 0,
+        overflowX: 'auto', overflowY: 'hidden',
+        borderBottom: '1px solid var(--border-subtle)',
+        marginBottom: 28,
+      }}>
+        {tabs.map(tab => (
+          <MaterialButton variant="tab" role="tab" aria-selected={active === tab.id}
+            id={`${id}-${tab.id}-tab`} aria-controls={`${id}-${tab.id}-panel`} tabIndex={active === tab.id ? 0 : -1}
+            key={tab.id}
+            className={active === tab.id ? 'admin-subtab admin-subtab-active' : 'admin-subtab'}
+            onClick={() => setActive(tab.id)}
+            style={{
+              padding: '8px 16px',
+              background: 'none', border: 'none',
+              color: active === tab.id ? 'var(--accent)' : 'var(--text-secondary)',
+              cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-medium-size)',
+              fontWeight: active === tab.id ? 600 : 400,
+              transition: 'color 0.15s, border-color 0.15s',
+              whiteSpace: 'nowrap',
+            }}
+            
+            
+          >
+            {tab.label}
+          </MaterialButton>
+        ))}
+      </div>
+      {tabs.map(tab => <div key={tab.id} role="tabpanel" id={`${id}-${tab.id}-panel`}
+        aria-labelledby={`${id}-${tab.id}-tab`} hidden={active !== tab.id}>
+        {active === tab.id && tab.content}
+      </div>)}
+    </div>
+  );
+}
+
+// ─── Merged Appearance Tab ────────────────────────────────────────────────────
+function AppearanceTab({ initialSubTab }) {
+  const { t } = useTranslation();
+  return (
+    <SubTabs initialTab={initialSubTab} tabs={[
+      { id: 'theme',  label: t('admin.tabs.theme'),          content: <ThemesTab /> },
+      { id: 'layout', label: t('admin.appearance.layout'),   content: <LayoutsTab /> },
+      { id: 'fonts',  label: t('admin.tabs.fontsAndLanguage'), content: (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 36 }}>
+          <LanguageTab />
+          <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 28 }}>
+            <FontsTab />
+          </div>
+        </div>
+      )},
+    ]} />
+  );
+}
+
+// ─── Merged Security & Privacy Tab ────────────────────────────────────────────
+function SecurityPrivacyTab({ initialSubTab }) {
+  const { t } = useTranslation();
+  return (
+    <SubTabs initialTab={initialSubTab} tabs={[
+      { id: 'security', label: t('admin.tabs.security'), content: <SecurityTab /> },
+      { id: 'privacy',  label: t('admin.tabs.privacy'),  content: <PrivacyTab /> },
+    ]} />
+  );
+}
+
+// ─── About Tab ───────────────────────────────────────────────────────────────
+function shortBuild(sha) {
+  return typeof sha === 'string' && /^[a-f0-9]{7,64}$/i.test(sha) ? sha.slice(0, 7) : '—';
+}
+
+function AboutTab() {
+  const { t } = useTranslation();
+  const [info, setInfo] = useState(null);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/version')
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(setInfo)
+      .catch(() => setInfo({ version: '—', sha: '—' }));
+  }, []);
+
+  const infoRows = [
+    [t('admin.about.frontendVersion'), frontendPackage.version],
+    [t('admin.about.frontendBuild'),  shortBuild(import.meta.env.VITE_BUILD_SHA)],
+    [t('admin.about.version'),        info ? info.version : '…'],
+    [t('admin.about.backendBuild'),   info ? shortBuild(info.sha) : '…'],
+    [t('admin.about.license'),        'AGPL-3.0'],
+  ];
+  const generalRows = [
+    [t('admin.about.website'),    'https://mailflow.sh'],
+  ];
+  const supportRows = [
+    [t('admin.about.kofi'),           'https://ko-fi.com/mailflow'],
+    [t('admin.about.githubSponsors'), 'https://github.com/sponsors/maathimself'],
+    [t('admin.about.businessLicense'), 'https://mailflow.sh/#pricing'],
+  ];
+
+  const rowStyle = (last) => ({
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    padding: '11px 14px', background: 'var(--bg-secondary)',
+    borderBottom: last ? 'none' : '1px solid var(--border-subtle)',
+  });
+
+  return (
+    <div style={{ maxWidth: 420 }}>
+      <div style={{ fontSize: 'var(--md-sys-typescale-title-large-size)', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
+        {DEFAULT_APP_NAME}
+      </div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)', marginBottom: 24 }}>
+        {t('admin.about.subtitle')}
+      </div>
+      <div style={{ borderRadius: 'var(--md-sys-shape-corner-medium)', overflow: 'hidden', border: '1px solid var(--border-subtle)', marginBottom: 12 }}>
+        {infoRows.map(([label, value], i) => (
+          <div key={label} style={rowStyle(i === infoRows.length - 1)}>
+            <span style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>{label}</span>
+            <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-primary)', fontFamily: 'monospace', letterSpacing: '0.02em' }}>{value}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ borderRadius: 'var(--md-sys-shape-corner-medium)', overflow: 'hidden', border: '1px solid var(--border-subtle)', marginBottom: 16 }}>
+        {generalRows.map(([label, href]) => (
+          <div key={label} style={rowStyle(false)}>
+            <span style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>{label}</span>
+            <a href={href} target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--accent)', textDecoration: 'none' }}
+            >{href.replace('https://', '')}</a>
+          </div>
+        ))}
+        <SourceNotice />
+      </div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 8px 4px' }}>
+        {t('admin.about.sponsor')}
+      </div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)', margin: '0 4px 10px', lineHeight: 1.5 }}>
+        {t('admin.about.sponsorBlurb')}
+      </div>
+      <div style={{ borderRadius: 'var(--md-sys-shape-corner-medium)', overflow: 'hidden', border: '1px solid var(--border-subtle)' }}>
+        {supportRows.map(([label, href], i) => (
+          <div key={label} style={rowStyle(i === supportRows.length - 1)}>
+            <span style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>{label}</span>
+            <a href={href} target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--accent)', textDecoration: 'none' }}
+            >{href.replace('https://', '')}</a>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '18px 0 8px 4px' }}>
+        {t('diagnostics.section')}
+      </div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)', margin: '0 4px 10px', lineHeight: 1.5 }}>
+        {t('diagnostics.blurb')}
+      </div>
+      <MaterialButton variant="outlined"
+        onClick={() => setShowDiagnostics(true)}
+        style={{ padding: '8px 16px', borderRadius: 'var(--md-sys-shape-corner-small)', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-primary)', fontSize: 'var(--md-sys-typescale-body-medium-size)', cursor: 'pointer' }}
+      >
+        {t('diagnostics.generateReport')}
+      </MaterialButton>
+
+      {showDiagnostics && <DiagnosticsReportModal onClose={() => setShowDiagnostics(false)} />}
+    </div>
+  );
+}
+
+// ─── Rules Tab ────────────────────────────────────────────────────────────────
+function RulesTab() {
+  const { t } = useTranslation();
+  const logicGroup = useId();
+  const { accounts, folders: storeFolders, setFolders, rulesPreFill, setRulesPreFill } = useStore();
+  const [rules, setRules] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [formMode, setFormMode] = useState(null); // null | 'add' | 'edit'
+  const [formId, setFormId] = useState(null);
+  const [formData, setFormData] = useState(null);
+  const [formError, setFormError] = useState('');
+  const [formSaving, setFormSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [runningRules, setRunningRules] = useState(false);
+  const [runResult, setRunResult] = useState(null);
+  const [runError, setRunError] = useState('');
+
+  // Drag-and-drop state for rules reorder
+  const [ruleDragIdx, setRuleDragIdx] = useState(null);
+  const [ruleDropIdx, setRuleDropIdx] = useState(null);
+
+  const isMobile = useMobile();
+
+  async function handleRunRules() {
+    setRunningRules(true);
+    setRunResult(null);
+    setRunError('');
+    try {
+      // 202: the sweep runs in the background. The rules_run_complete WebSocket event
+      // (useWebSocket.js) toasts the result, refreshes the views, and reaches this panel
+      // via the mailflow:rules-run-complete window event below.
+      await api.runRules();
+    } catch (err) {
+      setRunError(err.message || t('admin.rules.runError'));
+      setRunningRules(false);
+    }
+  }
+
+  useEffect(() => {
+    const onRunComplete = (event) => {
+      const detail = event.detail || {};
+      if (detail.ok === false) setRunError(t('admin.rules.runError'));
+      else setRunResult({ processed: detail.processed, matched: detail.matched });
+      setRunningRules(false);
+    };
+    window.addEventListener('mailflow:rules-run-complete', onRunComplete);
+    return () => window.removeEventListener('mailflow:rules-run-complete', onRunComplete);
+  }, [t]);
+
+  useEffect(() => {
+    api.getRules()
+      .then(data => { setRules(data); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (rulesPreFill) {
+      openAdd(rulesPreFill);
+      setRulesPreFill(null);
+    }
+  }, [rulesPreFill, setRulesPreFill]); // eslint-disable-line react-hooks/exhaustive-deps -- openAdd is a plain function; adding it would cause infinite re-runs
+
+  useEffect(() => {
+    if (!formMode || !formData?.accountId) return;
+    const accountId = formData.accountId;
+    if (accountId in useStore.getState().folders) return;
+    api.getFolders(accountId)
+      .then(data => setFolders(accountId, data))
+      .catch(() => {});
+  }, [formMode, formData?.accountId, setFolders]);
+
+  function blankForm(prefill = {}) {
+    return {
+      name: prefill.name || '',
+      accountId: '',
+      conditionLogic: 'AND',
+      conditions: [{
+        field: 'from',
+        operator: 'contains',
+        value: prefill.fromEmail || prefill.fromName || '',
+      }],
+      actions: [],
+      enabled: true,
+      stopProcessing: false,
+    };
+  }
+
+  function openAdd(prefill) {
+    setFormData(blankForm(prefill));
+    setFormId(null);
+    setFormMode('add');
+    setFormError('');
+  }
+
+  function openEdit(rule) {
+    const rawActions = Array.isArray(rule.actions) ? rule.actions : [];
+    const destActionsSet = new Set(['move', 'archive', 'delete']);
+    let destSeen = false;
+    const actions = rawActions.filter(a => {
+      if (destActionsSet.has(a.type)) {
+        if (destSeen) return false;
+        destSeen = true;
+      }
+      return true;
+    }).filter(a => !(a.type === 'move' && !rule.account_id));
+    setFormData({
+      name: rule.name,
+      accountId: rule.account_id || '',
+      conditionLogic: rule.condition_logic || 'AND',
+      conditions: Array.isArray(rule.conditions) ? rule.conditions : [],
+      actions,
+      enabled: rule.enabled,
+      stopProcessing: rule.stop_processing,
+    });
+    setFormId(rule.id);
+    setFormMode('edit');
+    setFormError('');
+  }
+
+  function closeForm() {
+    setFormMode(null);
+    setFormId(null);
+    setFormData(null);
+    setFormError('');
+  }
+
+  async function handleToggle(rule) {
+    const updated = { ...rule, enabled: !rule.enabled };
+    try {
+      const saved = await api.updateRule(rule.id, {
+        name: rule.name,
+        accountId: rule.account_id || null,
+        conditionLogic: rule.condition_logic,
+        conditions: rule.conditions,
+        actions: rule.actions,
+        enabled: updated.enabled,
+        stopProcessing: rule.stop_processing,
+      });
+      setRules(prev => prev.map(r => r.id === rule.id ? saved : r));
+    } catch { /* intentional */ }
+  }
+
+  async function handleDelete(id) {
+    try {
+      await api.deleteRule(id);
+      setRules(prev => prev.filter(r => r.id !== id));
+    } catch { /* intentional */ }
+    setConfirmDelete(null);
+  }
+
+  async function handleSave() {
+    const { name, conditionLogic, conditions, actions, accountId, enabled, stopProcessing } = formData;
+    if (!name.trim() || conditions.length === 0 || actions.length === 0) {
+      setFormError(t('admin.rules.errorRequired'));
+      return;
+    }
+    const moveAction = actions.find(a => a.type === 'move');
+    if (moveAction && !moveAction.value?.trim()) {
+      setFormError(t('admin.rules.errorMoveFolder'));
+      return;
+    }
+    const forwardAction = actions.find(action => action.type === 'forward');
+    if (forwardAction && !isValidForwardAddress(forwardAction.value)) {
+      setFormError(t('admin.rules.errorForwardEmail'));
+      return;
+    }
+    setFormSaving(true);
+    setFormError('');
+    try {
+      const payload = {
+        name: name.trim(),
+        accountId: accountId || null,
+        conditionLogic,
+        conditions,
+        actions,
+        enabled,
+        stopProcessing,
+      };
+      if (formMode === 'add') {
+        const created = await api.createRule(payload);
+        setRules(prev => [...prev, created]);
+      } else {
+        const updated = await api.updateRule(formId, payload);
+        setRules(prev => prev.map(r => r.id === formId ? updated : r));
+      }
+      closeForm();
+    } catch {
+      setFormError(t('admin.rules.errorSave'));
+    } finally {
+      setFormSaving(false);
+    }
+  }
+
+  async function handleReorderRules(from, to) {
+    const copy = [...rules];
+    const reordered = [...rules];
+    const [moved] = reordered.splice(from, 1);
+    reordered.splice(to, 0, moved);
+
+    setRules(reordered);
+
+    api.reorderRules(reordered.map(r => r.id)).catch(() => { setRules(copy); })
+  }
+
+  function setCondition(idx, key, val) {
+    setFormData(prev => {
+      const conditions = prev.conditions.map((c, i) => i === idx ? { ...c, [key]: val } : c);
+      return { ...prev, conditions };
+    });
+  }
+
+  function addCondition() {
+    setFormData(prev => ({
+      ...prev,
+      conditions: [...prev.conditions, { field: 'from', operator: 'contains', value: '' }],
+    }));
+  }
+
+  function removeCondition(idx) {
+    setFormData(prev => ({ ...prev, conditions: prev.conditions.filter((_, i) => i !== idx) }));
+  }
+
+  // move, archive, and delete are mutually exclusive destination actions —
+  // only one can apply to a given message. mark_read and star are independent.
+  const DESTINATION_ACTIONS = new Set(['move', 'archive', 'delete']);
+
+  function toggleAction(type) {
+    setFormData(prev => {
+      const has = prev.actions.some(a => a.type === type);
+      let actions;
+      if (has) {
+        actions = prev.actions.filter(a => a.type !== type);
+      } else if (DESTINATION_ACTIONS.has(type)) {
+        // Deselect any other destination action before adding this one
+        actions = [...prev.actions.filter(a => !DESTINATION_ACTIONS.has(a.type)), { type, value: '' }];
+      } else {
+        actions = [...prev.actions, { type, value: '' }];
+      }
+      return { ...prev, actions };
+    });
+  }
+
+  function setActionValue(type, value) {
+    setFormData(prev => ({
+      ...prev,
+      actions: prev.actions.map(a => a.type === type ? { ...a, value } : a),
+    }));
+  }
+
+  function conditionSummary(rule) {
+    const conds = Array.isArray(rule.conditions) ? rule.conditions : [];
+    if (!conds.length) return '—';
+    return conds.slice(0, 2).map(c => {
+      if (c.field === 'has_attachment') return t('admin.rules.fieldHasAttachment');
+      if (c.field === 'read_status') return c.value === 'read' ? t('admin.rules.readStatusRead') : t('admin.rules.readStatusUnread');
+      return `${c.field} ${c.operator} "${c.value}"`;
+    }).join(` ${rule.condition_logic} `) + (conds.length > 2 ? ` +${conds.length - 2}` : '');
+  }
+
+  function actionSummary(rule) {
+    const acts = Array.isArray(rule.actions) ? rule.actions : [];
+    if (!acts.length) return '—';
+    const labels = { mark_read: t('admin.rules.actionMarkRead'), star: t('admin.rules.actionStar'), forward: t('admin.rules.actionForward'), archive: t('admin.rules.actionArchive'), delete: t('admin.rules.actionDelete'), move: t('admin.rules.actionMove'), set_category: t('admin.rules.actionSetCategory'), notify: t('admin.rules.actionNotify') };
+    // Show the move destination and the category so same-named rules are tellable apart at a glance.
+    return acts.map(a => {
+      if (a.type === 'move' && a.value) return `${labels.move} → ${a.value}`;
+      if (a.type === 'set_category' && a.value) return `${labels.set_category} → ${t(`messageList.categories.${a.value}`)}`;
+      return labels[a.type] || a.type;
+    }).join(', ');
+  }
+
+  const FIELDS = [
+    { value: 'from',           label: t('admin.rules.fieldFrom') },
+    { value: 'to',             label: t('admin.rules.fieldTo') },
+    { value: 'subject',        label: t('admin.rules.fieldSubject') },
+    { value: 'body',           label: t('admin.rules.fieldBody') },
+    { value: 'header',         label: t('admin.rules.fieldHeader') },
+    { value: 'has_attachment', label: t('admin.rules.fieldHasAttachment') },
+    { value: 'read_status',    label: t('admin.rules.fieldReadStatus') },
+  ];
+  const OPERATORS = [
+    { value: 'contains',     label: t('admin.rules.opContains') },
+    { value: 'not_contains', label: t('admin.rules.opNotContains') },
+    { value: 'equals',       label: t('admin.rules.opEquals') },
+    { value: 'starts_with',  label: t('admin.rules.opStartsWith') },
+    { value: 'ends_with',    label: t('admin.rules.opEndsWith') },
+  ];
+  const HEADER_OPERATORS = [...OPERATORS, { value: 'regex', label: t('admin.rules.opRegex') }];
+  const RULE_CATEGORIES = ['primary', 'newsletter', 'promotion', 'automated', 'social'];
+  const ACTION_TYPES = [
+    { type: 'mark_read', label: t('admin.rules.actionMarkRead') },
+    { type: 'star',      label: t('admin.rules.actionStar') },
+    { type: 'forward',   label: t('admin.rules.actionForward') },
+    { type: 'archive',   label: t('admin.rules.actionArchive') },
+    { type: 'delete',    label: t('admin.rules.actionDelete') },
+    { type: 'move',      label: t('admin.rules.actionMove') },
+    { type: 'set_category', label: t('admin.rules.actionSetCategory') },
+    { type: 'notify',    label: t('admin.rules.actionNotify') },
+  ];
+
+  if (formMode) {
+    const fd = formData;
+    return (
+      <div style={{ maxWidth: 560 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+          <MaterialButton variant="text" onClick={closeForm} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '2px 6px', fontSize: 'var(--md-sys-typescale-body-large-size)', lineHeight: 1 }}>
+            ←
+          </MaterialButton>
+          <span style={{ fontWeight: 600, fontSize: 'var(--md-sys-typescale-body-large-size)' }}>
+            {formMode === 'add' ? t('admin.rules.formTitleAdd') : t('admin.rules.formTitleEdit')}
+          </span>
+        </div>
+
+        <Field label={t('admin.rules.nameLabel')} required>
+          <MaterialInput
+            style={inputStyle}
+            value={fd.name}
+            onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
+            placeholder={t('admin.rules.namePlaceholder')}
+          />
+        </Field>
+
+        <Field label={t('admin.rules.accountLabel')}>
+          <MaterialSelect
+            style={inputStyle}
+            value={fd.accountId}
+            onChange={e => setFormData(p => {
+              const newAccountId = e.target.value;
+              return {
+                ...p,
+                accountId: newAccountId,
+                actions: newAccountId
+                  ? p.actions.map(a => a.type === 'move' ? { ...a, value: '' } : a)
+                  : p.actions.filter(a => a.type !== 'move'),
+              };
+            })}
+          >
+            <option value="">{t('admin.rules.accountAll')}</option>
+            {accounts.map(a => (
+              <option key={a.id} value={a.id}>{a.name || a.email_address}</option>
+            ))}
+          </MaterialSelect>
+        </Field>
+
+        <Field label={t('admin.rules.conditionLogicLabel')}>
+          <div style={{ display: 'flex', gap: 16 }}>
+            {['AND', 'OR'].map(val => (
+              <label key={val} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>
+                <MaterialInput
+                  type="radio" name={logicGroup}
+                  checked={fd.conditionLogic === val}
+                  onChange={() => setFormData(p => ({ ...p, conditionLogic: val }))}
+                />
+                {val === 'AND' ? t('admin.rules.conditionLogicAnd') : t('admin.rules.conditionLogicOr')}
+              </label>
+            ))}
+          </div>
+        </Field>
+
+        <Field label={t('admin.rules.conditionsLabel')} required>
+          {fd.conditions.map((cond, idx) => (
+            <div key={idx} style={{ marginBottom: 6 }}>
+              <div className="material-rule-condition">
+                <MaterialSelect
+                  style={{ ...inputStyle, width: 'auto', flex: '0 0 auto' }}
+                  value={cond.field}
+                  onChange={e => {
+                    const newField = e.target.value;
+                    setFormData(prev => {
+                      const conditions = prev.conditions.map((c, i) => {
+                        if (i !== idx) return c;
+                        const next = { ...c, field: newField };
+                        if (newField !== 'header') delete next.headerName;
+                        if (newField === 'has_attachment') { delete next.operator; delete next.value; }
+                        else if (newField === 'read_status') {
+                          delete next.operator;
+                          if (next.value !== 'read' && next.value !== 'unread') next.value = 'unread';
+                        }
+                        else if (!next.operator) next.operator = 'contains';
+                        return next;
+                      });
+                      return { ...prev, conditions };
+                    });
+                  }}
+                >
+                  {FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                </MaterialSelect>
+                {cond.field !== 'has_attachment' && cond.field !== 'read_status' && (
+                  <>
+                    <MaterialSelect
+                      style={{ ...inputStyle, width: 'auto', flex: '0 0 auto' }}
+                      value={cond.operator || 'contains'}
+                      onChange={e => setCondition(idx, 'operator', e.target.value)}
+                    >
+                      {(cond.field === 'header' ? HEADER_OPERATORS : OPERATORS).map(o => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </MaterialSelect>
+                    <MaterialInput
+                      style={{ ...inputStyle, flex: 1 }}
+                      value={cond.value || ''}
+                      onChange={e => setCondition(idx, 'value', e.target.value)}
+                      placeholder="value"
+                    />
+                  </>
+                )}
+                {cond.field === 'read_status' && (
+                  <MaterialSelect
+                    style={{ ...inputStyle, flex: 1 }}
+                    value={cond.value === 'read' ? 'read' : 'unread'}
+                    onChange={e => setCondition(idx, 'value', e.target.value)}
+                  >
+                    <option value="read">{t('admin.rules.readStatusRead')}</option>
+                    <option value="unread">{t('admin.rules.readStatusUnread')}</option>
+                  </MaterialSelect>
+                )}
+                <MaterialButton variant="text"
+                  onClick={() => removeCondition(idx)}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-large-size)', padding: '0 4px', flexShrink: 0 }}
+                >
+                  ×
+                </MaterialButton>
+              </div>
+              {cond.field === 'header' && (
+                <MaterialInput
+                  style={{ ...inputStyle, marginTop: 4, marginLeft: 0, fontSize: 'var(--md-sys-typescale-body-small-size)' }}
+                  value={cond.headerName || ''}
+                  onChange={e => setCondition(idx, 'headerName', e.target.value)}
+                  placeholder={t('admin.rules.headerNamePlaceholder')}
+                />
+              )}
+              {cond.field === 'read_status' && (
+                <p style={{ margin: '4px 0 0', fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)' }}>
+                  {t('admin.rules.readStatusNote')}
+                </p>
+              )}
+              {cond.field === 'body' && (
+                <p style={{ margin: '4px 0 0', fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)' }}>
+                  {t('admin.rules.bodyConditionNote')}
+                </p>
+              )}
+            </div>
+          ))}
+          <MaterialButton variant="text"
+            onClick={addCondition}
+            style={{ marginTop: 4, fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+          >
+            + {t('admin.rules.addCondition')}
+          </MaterialButton>
+        </Field>
+
+        <Field label={t('admin.rules.actionsLabel')} required>
+          {ACTION_TYPES.map(({ type, label }) => {
+            const checked = fd.actions.some(a => a.type === type);
+            const moveVal = fd.actions.find(a => a.type === 'move')?.value || '';
+            const moveDisabled = type === 'move' && !fd.accountId;
+            return (
+              <div key={type} style={{ marginBottom: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: moveDisabled ? 'default' : 'pointer', fontSize: 'var(--md-sys-typescale-body-medium-size)', opacity: moveDisabled ? 0.45 : 1 }}>
+                  <MaterialInput type="checkbox" checked={checked} disabled={moveDisabled} onChange={() => toggleAction(type)} />
+                  {label}
+                </label>
+                {moveDisabled && (
+                  <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginLeft: 22, marginTop: 2 }}>
+                    {t('admin.rules.actionMoveRequiresAccount')}
+                  </div>
+                )}
+                {type === 'move' && checked && (() => {
+                  const allFolders = fd.accountId ? (storeFolders[fd.accountId] || []) : [];
+                  const movableFolders = allFolders.filter(f => f.path && f.path !== 'INBOX');
+                  if (movableFolders.length > 0) {
+                    return (
+                      <MaterialSelect
+                        style={{ ...inputStyle, marginTop: 6, marginLeft: 22 }}
+                        value={moveVal}
+                        onChange={e => setActionValue('move', e.target.value)}
+                        // The closed control clips long paths; surface the full
+                        // selected path as a tooltip. (A native <option> cannot
+                        // host the pickers' two-tone/hover-scroll label.)
+                        title={moveVal || undefined}
+                      >
+                        <option value="">{t('admin.rules.actionMoveSelectFolder')}</option>
+                        {movableFolders.map(f => {
+                          // Same ancestor-path display as the move pickers, so
+                          // same-named folders under different parents are
+                          // distinguishable when choosing a rule destination.
+                          const parent = folderParentLabel(f);
+                          const name = f.name || f.path;
+                          return (
+                            <option key={f.path} value={f.path}>
+                              {parent ? `${parent} / ${name}` : name}
+                            </option>
+                          );
+                        })}
+                      </MaterialSelect>
+                    );
+                  }
+                  return (
+                    <MaterialInput
+                      style={{ ...inputStyle, marginTop: 6, marginLeft: 22 }}
+                      value={moveVal}
+                      onChange={e => setActionValue('move', e.target.value)}
+                      placeholder={t('admin.rules.actionMovePlaceholder')}
+                    />
+                  );
+                })()}
+                {type === 'notify' && (
+                  <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginLeft: 22, marginTop: 2 }}>
+                    {t('admin.rules.actionNotifyHint')}
+                  </div>
+                )}
+                {type === 'set_category' && checked && (
+                  <MaterialSelect
+                    aria-label={t('admin.rules.actionSetCategory')}
+                    style={{ ...inputStyle, marginTop: 6, marginLeft: 22 }}
+                    value={fd.actions.find(action => action.type === 'set_category')?.value || ''}
+                    onChange={event => setActionValue('set_category', event.target.value)}
+                  >
+                    <option value="">{t('admin.rules.actionSetCategorySelect')}</option>
+                    {RULE_CATEGORIES.map(cat => (
+                      <option key={cat} value={cat}>{t(`messageList.categories.${cat}`)}</option>
+                    ))}
+                  </MaterialSelect>
+                )}
+                {type === 'forward' && checked && (
+                  <MaterialInput
+                    type="email"
+                    autoComplete="off"
+                    aria-label={t('admin.rules.actionForward')}
+                    style={{ ...inputStyle, marginTop: 6, marginLeft: 22 }}
+                    value={fd.actions.find(action => action.type === 'forward')?.value || ''}
+                    onChange={event => setActionValue('forward', event.target.value)}
+                    placeholder={t('admin.rules.actionForwardPlaceholder')}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </Field>
+
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 'var(--md-sys-typescale-body-medium-size)', cursor: 'pointer', marginBottom: 20 }}>
+          <MaterialInput
+            type="checkbox"
+            checked={fd.stopProcessing}
+            onChange={e => setFormData(p => ({ ...p, stopProcessing: e.target.checked }))}
+            style={{ marginTop: 2, flexShrink: 0 }}
+          />
+          <div>
+            <div>{t('admin.rules.stopProcessing')}</div>
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>{t('admin.rules.stopProcessingHint')}</div>
+          </div>
+        </label>
+
+        {formError && (
+          <div style={{ color: 'var(--red)', fontSize: 'var(--md-sys-typescale-body-small-size)', marginBottom: 12 }}>{formError}</div>
+        )}
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <MaterialButton variant="filled"
+            onClick={handleSave}
+            disabled={formSaving}
+            style={{ flex: 1, padding: '9px 0', background: 'var(--accent)', color: 'var(--accent-text)', border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)', fontWeight: 600, fontSize: 'var(--md-sys-typescale-body-medium-size)', cursor: formSaving ? 'not-allowed' : 'pointer', opacity: formSaving ? 0.7 : 1 }}
+          >
+            {formSaving ? t('admin.rules.saving') : t('admin.rules.saveButton')}
+          </MaterialButton>
+          <MaterialButton variant="outlined"
+            onClick={closeForm}
+            style={{ padding: '9px 18px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--text-primary)', fontSize: 'var(--md-sys-typescale-body-medium-size)', cursor: 'pointer' }}
+          >
+            {t('common.cancel')}
+          </MaterialButton>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="admin-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+        <span style={{ fontWeight: 600, fontSize: 'var(--md-sys-typescale-body-large-size)' }}>{t('admin.rules.title')}</span>
+        <div className="admin-section-actions" style={{ display: 'flex', gap: 8 }}>
+          <MaterialButton variant="outlined"
+            onClick={handleRunRules}
+            disabled={runningRules}
+            style={{ padding: '7px 14px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', fontWeight: 600, fontSize: 'var(--md-sys-typescale-body-medium-size)', cursor: runningRules ? 'not-allowed' : 'pointer', color: 'var(--text-primary)', opacity: runningRules ? 0.6 : 1 }}
+          >
+            {runningRules ? t('admin.rules.running') : t('admin.rules.runButton')}
+          </MaterialButton>
+          <MaterialButton variant="filled"
+            onClick={() => openAdd({})}
+            style={{ padding: '7px 14px', background: 'var(--accent)', color: 'var(--accent-text)', border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)', fontWeight: 600, fontSize: 'var(--md-sys-typescale-body-medium-size)', cursor: 'pointer' }}
+          >
+            + {t('admin.rules.newButton')}
+          </MaterialButton>
+        </div>
+      </div>
+
+      {runningRules && (
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 12 }}>
+          {t('admin.rules.runStarted')}
+        </div>
+      )}
+      {runResult && (
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 12 }}>
+          {t('admin.rules.runResult', { matched: runResult.matched, processed: runResult.processed })}
+        </div>
+      )}
+      {runError && (
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--red)', marginBottom: 12 }}>{runError}</div>
+      )}
+
+      {loading && <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>{t('common.loading')}</div>}
+
+      {!loading && rules.length === 0 && (
+        <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>{t('admin.rules.empty')}</div>
+      )}
+
+      {rules.map((rule, idx) => {
+        const isDragging = ruleDragIdx === idx;
+        const isDropTarget = ruleDropIdx === idx && ruleDragIdx !== null && ruleDragIdx !== idx;
+        const canDrag = rules.length > 1;
+
+        return (
+          <div
+            key={rule.id}
+            className="no-callout"
+            onDragOver={e => {
+              e.preventDefault();
+              setRuleDropIdx(idx);
+            }}
+            onDrop={e => {
+              e.preventDefault();
+              if (canDrag && ruleDragIdx !== null && ruleDragIdx !== idx) {
+                handleReorderRules(ruleDragIdx, idx)
+              }
+
+              setRuleDragIdx(null);
+              setRuleDropIdx(null);
+            }}
+            onDragEnd={canDrag ? () => { setRuleDragIdx(null); setRuleDropIdx(null); } : undefined}
+            style={{
+              padding: '12px 14px',
+              marginBottom: 8,
+              borderRadius: 'var(--md-sys-shape-corner-small)',
+              touchAction: 'pan-y',
+              background: 'var(--bg-tertiary)',
+              opacity: isDragging ? 0.4 : 1,
+              border: '1px solid var(--border)',
+              borderTop: isDropTarget ? '1px solid var(--accent)' : '1px solid var(--border)'
+            }}
+          >
+            {confirmDelete === rule.id ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-primary)', flex: 1 }}>{t('admin.rules.deleteConfirm')}</span>
+                <MaterialButton variant="text"
+                  onClick={() => handleDelete(rule.id)}
+                  style={{ padding: '5px 12px', background: 'var(--red)', color: '#fff', border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-small-size)', cursor: 'pointer' }}
+                >
+                  {t('admin.rules.deleteButton')}
+                </MaterialButton>
+                <MaterialButton variant="outlined"
+                  onClick={() => setConfirmDelete(null)}
+                  style={{ padding: '5px 12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-small-size)', cursor: 'pointer', color: 'var(--text-primary)' }}
+                >
+                  {t('common.cancel')}
+                </MaterialButton>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                {canDrag && (
+                  <span
+                    draggable={!isMobile}
+                    onDragStart={!isMobile ? () => { setRuleDragIdx(idx); setRuleDropIdx(null); } : undefined}
+                    style={{ color: 'var(--text-primary)', flexShrink: 0, display: 'flex', opacity: 0.4, cursor: isMobile ? 'default' : 'grab' }}
+                  >
+                    <MaterialIcon name="drag_indicator" />
+                  </span>
+                )}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 0, cursor: 'pointer', marginTop: 2, flexShrink: 0 }}>
+                  <MaterialInput type="checkbox" checked={rule.enabled} onChange={() => handleToggle(rule)} />
+                </label>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 'var(--md-sys-typescale-body-medium-size)', marginBottom: 2 }}>{rule.name || '(unnamed)'}</div>
+                  <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {conditionSummary(rule)} → {actionSummary(rule)}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                  <MaterialButton variant="outlined"
+                    onClick={() => openEdit(rule)}
+                    style={{ padding: '4px 10px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-small-size)', cursor: 'pointer', color: 'var(--text-primary)' }}
+                  >
+                    {t('admin.rules.editButton')}
+                  </MaterialButton>
+                  <MaterialButton variant="outlined"
+                    onClick={() => setConfirmDelete(rule.id)}
+                    style={{ padding: '4px 10px', background: 'none', border: '1px solid var(--red)', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-small-size)', cursor: 'pointer', color: 'var(--red)' }}
+                  >
+                    {t('admin.rules.deleteButton')}
+                  </MaterialButton>
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  );
+}
+
+// ─── Block List Tab ────────────────────────────────────────────────────────────
+function BlockListTab() {
+  const { t } = useTranslation();
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [newEmail, setNewEmail] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api.getBlockList()
+      .then(data => { setEntries(data); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  async function handleAdd(e) {
+    e.preventDefault();
+    const email = newEmail.trim();
+    if (!email) return;
+    setAdding(true);
+    setError('');
+    try {
+      const entry = await api.addToBlockList(email);
+      setEntries(prev => [entry, ...prev]);
+      setNewEmail('');
+    } catch {
+      setError(t('admin.blockList.errorAdd'));
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function handleRemove(id) {
+    try {
+      await api.removeFromBlockList(id);
+      setEntries(prev => prev.filter(e => e.id !== id));
+    } catch { /* intentional */ }
+  }
+
+  return (
+    <div>
+      <p style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)', marginTop: 0, marginBottom: 16 }}>
+        {t('admin.blockList.description')}
+      </p>
+      <form onSubmit={handleAdd} style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        <MaterialInput
+          style={{ ...inputStyle, flex: 1 }}
+          type="email"
+          value={newEmail}
+          onChange={e => setNewEmail(e.target.value)}
+          placeholder={t('admin.blockList.emailPlaceholder')}
+        />
+        <MaterialButton variant="filled"
+          type="submit"
+          disabled={adding || !newEmail.trim()}
+          style={{ padding: '8px 16px', background: 'var(--accent)', color: 'var(--accent-text)', border: 'none', borderRadius: 'var(--md-sys-shape-corner-small)', fontWeight: 600, fontSize: 'var(--md-sys-typescale-body-medium-size)', cursor: adding ? 'not-allowed' : 'pointer', opacity: adding ? 0.7 : 1, flexShrink: 0 }}
+        >
+          {t('admin.blockList.addButton')}
+        </MaterialButton>
+      </form>
+      {error && <div style={{ color: 'var(--red)', fontSize: 'var(--md-sys-typescale-body-small-size)', marginBottom: 12 }}>{error}</div>}
+      {loading && <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>{t('common.loading')}</div>}
+      {!loading && entries.length === 0 && (
+        <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>{t('admin.blockList.empty')}</div>
+      )}
+      {entries.map(entry => (
+        <div key={entry.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', padding: '10px 14px', marginBottom: 6 }}>
+          <span style={{ flex: 1, fontSize: 'var(--md-sys-typescale-body-medium-size)', fontFamily: 'monospace', wordBreak: 'break-all' }}>{entry.email_address}</span>
+          <MaterialButton variant="outlined"
+            onClick={() => handleRemove(entry.id)}
+            style={{ padding: '4px 10px', background: 'none', border: '1px solid var(--red)', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-small-size)', cursor: 'pointer', color: 'var(--red)', flexShrink: 0 }}
+          >
+            {t('admin.blockList.removeButton')}
+          </MaterialButton>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RulesAndBlockListTab({ initialSubTab }) {
+  const { t } = useTranslation();
+  return (
+    <SubTabs initialTab={initialSubTab} tabs={[
+      { id: 'rules',      label: t('admin.rules.subTabRules'),     content: <RulesTab /> },
+      { id: 'block-list', label: t('admin.rules.subTabBlockList'), content: <BlockListTab /> },
+    ]} />
+  );
+}
+
+// Mailbox Cleanup: analyze an INBOX for bulk-mail bloat and move a chosen sender's mail to Trash.
+// All analysis is read-only; the destructive step reuses the existing, proven bulkDelete (move to
+// Trash, recoverable) in <=500-id batches. Scope is enforced server-side (own account, INBOX, exact
+// sender), and the operation is idempotent: re-running a cleared sender finds nothing.
+function MailboxCleanupTab() {
+  const { t } = useTranslation();
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const { accounts } = useStore();
+  const [accountId, setAccountId] = useState(accounts[0]?.id || '');
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [busySender, setBusySender] = useState('');
+  const [progress, setProgress] = useState(null);
+  // Cleanup action for the whole view (#403): Archive is the default and recommended
+  // choice; Trash stays available as an explicit alternative. One selector governs
+  // every sender row, not a per-row pair of buttons.
+  const [action, setAction] = useState('archive');
+  const archiveAvailable = data ? data.archiveAvailable !== false : true;
+  // If the selected account has no archive folder, Archive isn't a usable action —
+  // fall back to Trash so the row button never runs an action the server can't honor.
+  useEffect(() => { if (data && data.archiveAvailable === false) setAction('trash'); }, [data]);
+
+  // Re-fetch the summary/sender data without touching the error banner or the loading
+  // spinner, so a caller that just wants fresh counts (after a cleanup, including a partial
+  // failure) can refresh without clobbering an error it already set.
+  const fetchUsage = useCallback(async (id) => {
+    setData(await api.mailboxUsage(id));
+  }, []);
+
+  const load = useCallback(async (id) => {
+    if (!id) return;
+    setLoading(true); setError('');
+    try { await fetchUsage(id); }
+    catch (e) { setError(e.message); setData(null); }
+    finally { setLoading(false); }
+  }, [fetchUsage]);
+
+  useEffect(() => { if (accountId) load(accountId); }, [accountId, load]);
+
+  // Senders ticked for a batch run; keyed by fromEmail. Only ever read through
+  // `selectedSenders`, so senders that vanish after a refresh drop out on their own.
+  const [selected, setSelected] = useState(() => new Set());
+  const senders = data?.tier1Senders || [];
+  const selectedSenders = senders.filter(s => selected.has(s.fromEmail));
+  const allSelected = senders.length > 0 && selectedSenders.length === senders.length;
+  // The row-button busy marker for a batch run; not a valid fromEmail, so no row matches it.
+  const BATCH = '*';
+  useEffect(() => { setSelected(new Set()); }, [accountId]);
+
+  const toggleSender = (email) => setSelected(prev => {
+    const next = new Set(prev);
+    if (!next.delete(email)) next.add(email);
+    return next;
+  });
+
+  // One confirm and one progress bar for the whole list; each sender is still resolved server-side
+  // (own account, INBOX, exact sender) and moved in <=500-id batches, in sequence.
+  const cleanupSenders = async (list) => {
+    const isArchive = action === 'archive';
+    const labelOf = (s) => (s.fromName ? `${s.fromName} <${s.fromEmail}>` : s.fromEmail);
+    const shown = list.slice(0, 3).map(labelOf).join(', ');
+    const label = list.length > 3 ? `${shown} +${list.length - 3}` : shown;
+    const grandTotal = list.reduce((n, s) => n + s.count, 0);
+    const confirmKey = isArchive ? 'admin.cleanup.confirmArchive' : 'admin.cleanup.confirm';
+    setConfirmDialog({
+      title: t(isArchive ? 'message.archive' : 'common.delete'),
+      message: t(confirmKey, { count: grandTotal, sender: label }),
+      confirmLabel: t(isArchive ? 'message.archive' : 'common.delete'),
+      onConfirm: async () => {
+        setBusySender(list.length === 1 ? list[0].fromEmail : BATCH); setError(''); setProgress({ done: 0, total: grandTotal });
+        try {
+          const runBatch = isArchive ? api.bulkArchive : api.bulkDelete;
+          let done = 0;
+          for (const s of list) {
+            const { ids } = await api.cleanupPreview(accountId, s.fromEmail);
+            for (let i = 0; i < ids.length; i += 500) {
+              const batch = ids.slice(i, i + 500);
+              await runBatch(batch);
+              done += batch.length;
+              setProgress({ done, total: grandTotal });
+            }
+          }
+        } catch (e) { setError(e.message); }
+        finally {
+          // Always refresh counts so the summary reflects what actually got archived or trashed,
+          // even on a partial failure; preserve any error already set (don't route through load()).
+          try { await fetchUsage(accountId); } catch { /* keep the primary error and last-good data */ }
+          setBusySender(''); setProgress(null);
+        }
+      },
+    });
+  };
+
+  const bloatPct = data && data.inboxTotal ? Math.round((data.bulkTotal / data.inboxTotal) * 100) : 0;
+  const card = { background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 14, marginBottom: 16 };
+  const muted = { fontSize: 12, color: 'var(--text-tertiary)' };
+
+  return (
+    <div>
+      <ConfirmOverlay dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
+      <h2 style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, margin: '0 0 6px' }}>{t('admin.cleanup.title')}</h2>
+      <p style={{ ...muted, marginTop: 0, marginBottom: 16, lineHeight: 1.5 }}>{t('admin.cleanup.intro')}</p>
+
+      {accounts.length > 1 && (
+        <Field label={t('admin.cleanup.account')}>
+          <MaterialSelect value={accountId} disabled={!!busySender} onChange={e => setAccountId(e.target.value)} style={{ ...inputStyle, appearance: 'none' }}>
+            {accounts.map(a => <option key={a.id} value={a.id}>{a.email_address}</option>)}
+          </MaterialSelect>
+        </Field>
+      )}
+
+      {loading && <div style={muted}>{t('common.loading')}</div>}
+      {error && <div style={{ color: 'var(--red, #ef4444)', fontSize: 'var(--md-sys-typescale-body-medium-size)', marginBottom: 12 }}>{error}</div>}
+
+      {data && !loading && (
+        <>
+          <div style={card}>
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)' }}>
+              {t('admin.cleanup.summary', { bulk: data.bulkTotal.toLocaleString(), total: data.inboxTotal.toLocaleString(), pct: bloatPct })}
+            </div>
+          </div>
+
+          <Field label={t('admin.cleanup.action')}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {[
+                { key: 'archive', label: t('admin.cleanup.actionArchive'), disabled: !archiveAvailable },
+                { key: 'trash', label: t('admin.cleanup.moveToTrash'), disabled: false },
+              ].map(opt => {
+                const selected = action === opt.key;
+                return (
+                  <MaterialButton variant="text" selected={selected}
+                    key={opt.key}
+                    type="button"
+                    disabled={opt.disabled || !!busySender}
+                    onClick={() => setAction(opt.key)}
+                    style={{
+                      padding: '7px 14px', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
+                      cursor: (opt.disabled || busySender) ? 'not-allowed' : 'pointer',
+                      border: `1px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
+                      background: selected ? 'var(--accent)' : 'var(--bg-secondary)',
+                      color: selected ? 'var(--accent-text, white)' : 'var(--text-secondary)',
+                      opacity: opt.disabled ? 0.5 : 1,
+                    }}
+                  >
+                    {opt.label}
+                  </MaterialButton>
+                );
+              })}
+            </div>
+            {!archiveAvailable && (
+              <div style={{ ...muted, marginTop: 8 }}>{t('admin.cleanup.noArchiveFolder')}</div>
+            )}
+          </Field>
+
+          <h3 style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, margin: '0 0 4px' }}>{t('admin.cleanup.tier1Title')}</h3>
+          <p style={{ ...muted, marginTop: 0, marginBottom: 12, lineHeight: 1.5 }}>{t('admin.cleanup.tier1Desc')}</p>
+          {data.tier1Senders.length === 0 ? (
+            <div style={muted}>{t('admin.cleanup.noneFound')}</div>
+          ) : (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 4px', borderBottom: '1px solid var(--border-subtle)' }}>
+                <MaterialInput aria-label={t(allSelected ? 'messageList.deselectAll' : 'messageList.selectAll')}
+                  type="checkbox"
+                  id="cleanup-select-all"
+                  checked={allSelected}
+                  disabled={!!busySender}
+                  onChange={() => setSelected(allSelected ? new Set() : new Set(senders.map(s => s.fromEmail)))}
+                />
+                <label htmlFor="cleanup-select-all" style={{ ...muted, flex: 1, cursor: 'pointer' }}>
+                  {t(allSelected ? 'messageList.deselectAll' : 'messageList.selectAll')}
+                </label>
+                <MaterialButton variant="outlined" selected={action === 'archive'}
+                  type="button"
+                  disabled={!!busySender || selectedSenders.length === 0}
+                  onClick={() => cleanupSenders(selectedSenders)}
+                  style={{
+                    flexShrink: 0, padding: '6px 12px', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 500,
+                    border: '1px solid var(--border)',
+                    cursor: (busySender || selectedSenders.length === 0) ? 'not-allowed' : 'pointer',
+                    background: action === 'archive' ? 'var(--accent)' : 'var(--amber, #d97706)',
+                    color: action === 'archive' ? 'var(--accent-text, white)' : 'white',
+                    opacity: selectedSenders.length === 0 || (busySender && busySender !== BATCH) ? 0.5 : 1,
+                  }}
+                >
+                  {busySender === BATCH && progress
+                    ? `${progress.done.toLocaleString()}/${progress.total.toLocaleString()}`
+                    : `${t(action === 'archive' ? 'admin.cleanup.archive' : 'admin.cleanup.moveToTrash')} (${selectedSenders.length})`}
+                </MaterialButton>
+              </div>
+              {data.tier1Senders.map(s => (
+                <div key={s.fromEmail} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 4px', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <MaterialInput
+                    type="checkbox"
+                    checked={selected.has(s.fromEmail)}
+                    disabled={!!busySender}
+                    onChange={() => toggleSender(s.fromEmail)}
+                    aria-label={s.fromName || s.fromEmail}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.fromName || s.fromEmail}</div>
+                    {s.fromName && <div style={{ ...muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.fromEmail}</div>}
+                  </div>
+                  <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-secondary)', flexShrink: 0 }}>{s.count.toLocaleString()}</div>
+                  <MaterialButton variant="outlined"
+                    type="button"
+                    disabled={!!busySender}
+                    onClick={() => cleanupSenders([s])}
+                    style={{
+                      flexShrink: 0, padding: '6px 12px', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 500,
+                      border: '1px solid var(--border)', cursor: busySender ? 'not-allowed' : 'pointer',
+                      background: busySender === s.fromEmail
+                        ? 'var(--bg-tertiary)'
+                        : (action === 'archive' ? 'var(--accent)' : 'var(--amber, #d97706)'),
+                      color: busySender === s.fromEmail
+                        ? 'var(--text-secondary)'
+                        : (action === 'archive' ? 'var(--accent-text, white)' : 'white'),
+                      opacity: busySender && busySender !== s.fromEmail ? 0.5 : 1,
+                    }}
+                  >
+                    {busySender === s.fromEmail
+                      ? (progress ? `${progress.done.toLocaleString()}/${progress.total.toLocaleString()}` : '...')
+                      : t(action === 'archive' ? 'admin.cleanup.archive' : 'admin.cleanup.moveToTrash')}
+                  </MaterialButton>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <h3 style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, margin: '0 0 4px' }}>{t('admin.cleanup.tier2Title')}</h3>
+          <p style={{ ...muted, marginTop: 0, marginBottom: 10, lineHeight: 1.5 }}>{t('admin.cleanup.tier2Desc')}</p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
+            {data.tier2Keywords.filter(k => k.count > 0).map(k => (
+              <span key={k.keyword} style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', padding: '4px 10px', borderRadius: 'var(--md-sys-shape-corner-extra-large)', background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)' }}>
+                {k.keyword} <span style={{ color: 'var(--text-tertiary)' }}>({k.count.toLocaleString()})</span>
+              </span>
+            ))}
+          </div>
+
+          <h3 style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, margin: '0 0 4px' }}>{t('admin.cleanup.tier3Title')}</h3>
+          <p style={{ ...muted, marginTop: 0, lineHeight: 1.5 }}>{t('admin.cleanup.tier3Desc')}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+const TAB_GROUPS = [
+  { id: 'mail', labelKey: 'admin.tabs.groupMail', tabIds: ['accounts', 'rules', 'categories', 'antispam', 'cleanup'] },
+  { id: 'preferences', labelKey: 'admin.tabs.groupPreferences', tabIds: ['appearance', 'behavior', 'notifications', 'shortcuts', 'security'] },
+  { id: 'ai-extensions', labelKey: 'admin.tabs.groupAiExtensions', tabIds: ['ai-actions', 'ai', 'integrations', 'plugins'] },
+  { id: 'admin', labelKey: 'admin.tabs.groupAdmin', tabIds: ['users', 'sso', 'mail-signin', 'backup'] },
+];
+
+const TABS = [
+  // Mail
+  {
+    id: 'accounts', labelKey: 'admin.tabs.accounts',
+    icon: <MaterialIcon name="mail" />,
+  },
+  {
+    id: 'rules', labelKey: 'admin.tabs.rules',
+    icon: <MaterialIcon name="filter_alt" />,
+  },
+  {
+    id: 'categories', labelKey: 'admin.tabs.categories',
+    icon: <MaterialIcon name="grid_view" />,
+  },
+  {
+    id: 'antispam', labelKey: 'admin.tabs.antispam',
+    icon: <MaterialIcon name="auto_awesome" />,
+  },
+  {
+    id: 'cleanup', labelKey: 'admin.tabs.cleanup', beta: true,
+    icon: <MaterialIcon name="vaccines" />,
+  },
+  // Preferences
+  {
+    id: 'appearance', labelKey: 'admin.tabs.appearance',
+    icon: <MaterialIcon name="settings" />,
+  },
+  {
+    id: 'behavior', labelKey: 'admin.tabs.behavior',
+    icon: <MaterialIcon name="tune" />,
+  },
+  {
+    id: 'notifications', labelKey: 'admin.tabs.notifications',
+    icon: <MaterialIcon name="volume_up" />,
+  },
+  {
+    id: 'shortcuts', labelKey: 'admin.tabs.shortcuts',
+    mobileHidden: true,
+    icon: <MaterialIcon name="keyboard" />,
+  },
+  {
+    id: 'security', labelKey: 'admin.tabs.security',
+    icon: <MaterialIcon name="shield" />,
+  },
+  // AI & Extensions
+  {
+    id: 'ai-actions', labelKey: 'admin.tabs.aiActions',
+    icon: <MaterialIcon name="auto_fix_high" />,
+  },
+  {
+    id: 'ai', labelKey: 'admin.tabs.ai',
+    adminOnly: true,
+    icon: <MaterialIcon name="auto_awesome" />,
+  },
+  {
+    id: 'integrations', labelKey: 'admin.tabs.integrations',
+    icon: <MaterialIcon name="radar" />,
+  },
+  {
+    id: 'plugins', labelKey: 'admin.tabs.plugins', beta: true,
+    icon: <MaterialIcon name="extension" />,
+  },
+  // Administration
+  {
+    id: 'users', labelKey: 'admin.tabs.users',
+    adminOnly: true,
+    icon: <MaterialIcon name="contacts" />,
+  },
+  {
+    id: 'sso', labelKey: 'admin.tabs.sso',
+    adminOnly: true,
+    icon: <MaterialIcon name="lock" />,
+  },
+  {
+    id: 'mail-signin', labelKey: 'admin.tabs.mailSignIn',
+    adminOnly: true,
+    icon: <MaterialIcon name="schedule_send" />,
+  },
+  {
+    id: 'backup', labelKey: 'admin.tabs.backup',
+    adminOnly: true,
+    icon: <MaterialIcon name="download" />,
+  },
+  // About (ungrouped, pinned to bottom)
+  {
+    id: 'about', labelKey: 'admin.tabs.about',
+    icon: <MaterialIcon name="info" />,
+  },
+];
+
+// ─── Shortcuts Tab ───────────────────────────────────────────────────────────
+function ShortcutsTab() {
+  const { t } = useTranslation();
+  const { shortcuts, setShortcuts } = useStore();
+  const [recording, setRecording] = useState(null); // action name currently being recorded
+
+  const effective = getEffectiveShortcuts(shortcuts);
+  const conflicts = getShortcutConflicts(shortcuts);
+  const groups = getGroupedActions();
+
+  // Listen for key presses while recording
+  useEffect(() => {
+    if (!recording) return;
+    const handler = (e) => {
+      // Ignore pure modifier keys
+      if (['Shift', 'Control', 'Meta', 'Alt', 'CapsLock', 'Tab'].includes(e.key)) return;
+      e.preventDefault();
+
+      if (e.key === 'Escape') {
+        setRecording(null);
+        return;
+      }
+
+      const key = shortcutBindingFromEvent(e);
+
+      const updated = { ...shortcuts, [recording]: key };
+      setShortcuts(updated);
+      setRecording(null);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [recording, shortcuts, setShortcuts]);
+
+  const clearShortcut = (action) => {
+    const updated = { ...shortcuts, [action]: null };
+    setShortcuts(updated);
+  };
+
+  const resetAction = (action) => {
+    const updated = { ...shortcuts };
+    delete updated[action];
+    setShortcuts(updated);
+  };
+
+  const resetAll = () => {
+    setShortcuts({});
+    setRecording(null);
+  };
+
+  const kbdStyle = {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    minWidth: 26, height: 22, padding: '0 6px',
+    background: 'var(--bg-primary)', border: '1px solid var(--border)',
+    borderBottomWidth: 2, borderRadius: 4,
+    fontSize: 12, fontFamily: 'monospace', fontWeight: 600,
+    color: 'var(--text-primary)',
+  };
+
+  const renderKey = (action, key) => {
+    const isRec = recording === action;
+    if (isRec) {
+      return (
+        <span style={{
+          display: 'inline-flex', alignItems: 'center',
+          padding: '2px 10px', borderRadius: 'var(--md-sys-shape-corner-extra-small)',
+          background: 'var(--accent-dim)', border: '1px solid var(--accent)',
+          fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--accent)', fontStyle: 'italic',
+        }}>
+          {t('admin.shortcuts.recording')}
+        </span>
+      );
+    }
+    if (!key) {
+      return <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)' }}>—</span>;
+    }
+    // Modifier combos like 'ctrl+p'
+    const mod = parseModKey(key);
+    if (mod) {
+      return (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          <kbd style={kbdStyle}>{modLabel(mod.mod)}</kbd>
+          <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)' }}>+</span>
+          <kbd style={kbdStyle}>{mod.bare.toUpperCase()}</kbd>
+        </span>
+      );
+    }
+    // Special key names like 'Delete', 'ArrowUp' — single keypress, render as one badge
+    if (SPECIAL_KEY_LABELS[key]) {
+      return <kbd style={kbdStyle}>{SPECIAL_KEY_LABELS[key]}</kbd>;
+    }
+    // Multi-char keys like 'gi': render each character as separate kbd with "then"
+    if (key.length > 1) {
+      return (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          {[...key].map((c, i) => (
+            <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              <kbd style={kbdStyle}>{c}</kbd>
+              {i < key.length - 1 && <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)' }}>{t('shortcuts.then')}</span>}
+            </span>
+          ))}
+        </span>
+      );
+    }
+    return <kbd style={kbdStyle}>{key}</kbd>;
+  };
+
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)' }}>{t('admin.shortcuts.title')}</div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 3 }}>
+            {t('admin.shortcuts.description')}
+          </div>
+        </div>
+        <MaterialButton variant="outlined"
+          onClick={resetAll}
+          style={{
+            background: 'none', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)',
+            padding: '6px 14px', cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-small-size)',
+            color: 'var(--text-secondary)', flexShrink: 0,
+          }}
+          
+          
+        >
+          {t('admin.shortcuts.resetAll')}
+        </MaterialButton>
+      </div>
+
+      {conflicts.map(({ key, loser, winner }) => (
+        <div key={`${key}:${loser}`} style={{
+          marginBottom: 16, padding: '10px 14px',
+          background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.4)',
+          borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)',
+        }}>
+          {t('admin.shortcuts.conflict', { key, action: shortcutActionText(t, winner, 'label') })}
+        </div>
+      ))}
+
+      {Object.entries(groups).map(([groupName, actions]) => (
+        <div key={groupName} style={{ marginBottom: 24 }}>
+          <div style={{
+            fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 600, color: 'var(--text-tertiary)',
+            textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6,
+          }}>
+            {t(groupName)}
+          </div>
+          <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', overflow: 'hidden' }}>
+            {actions.map(({ action }, i) => {
+              const key = effective[action];
+              const isDefault = !(action in shortcuts);
+              const isRec = recording === action;
+              return (
+                <div
+                  key={action}
+                  style={{
+                    display: 'flex', alignItems: 'center',
+                    padding: '10px 14px', gap: 12,
+                    borderBottom: i < actions.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+                    background: isRec ? 'var(--accent-dim)' : 'transparent',
+                    transition: 'background 0.1s',
+                  }}
+                >
+                  <span style={{ flex: 1, fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>
+                    {shortcutActionText(t, action)}
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    <MaterialButton variant="text"
+                      onClick={() => setRecording(isRec ? null : action)}
+                      title={isRec ? t('common.cancel') : t('admin.shortcuts.description')}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        padding: 0, display: 'flex', alignItems: 'center',
+                      }}
+                    >
+                      {renderKey(action, key)}
+                    </MaterialButton>
+                    {!isDefault && (
+                      <MaterialButton variant="icon"
+                        onClick={() => resetAction(action)}
+                        title={t('admin.shortcuts.resetDefault')}
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer',
+                          color: 'var(--text-tertiary)', padding: 2,
+                          fontSize: 'var(--md-sys-typescale-body-small-size)', display: 'flex', alignItems: 'center',
+                        }}
+                        
+                        
+                      >
+                        <MaterialIcon name="undo" />
+                      </MaterialButton>
+                    )}
+                    {key && !isRec && (
+                      <MaterialButton variant="icon"
+                        onClick={() => clearShortcut(action)}
+                        title={t('admin.shortcuts.remove')}
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer',
+                          color: 'var(--text-tertiary)', padding: 2,
+                          display: 'flex', alignItems: 'center',
+                        }}
+                        
+                        
+                      >
+                        <MaterialIcon name="close" />
+                      </MaterialButton>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 4 }}>
+        {t('admin.shortcuts.footer')}
+      </div>
+    </div>
+  );
+}
+
+// ─── Privacy Tab ─────────────────────────────────────────────────────────────
+function PrivacyTab() {
+  const { t } = useTranslation();
+  const { blockRemoteImages, setBlockRemoteImages, imageWhitelist, setImageWhitelist, addToImageWhitelist, addNotification } = useStore();
+  const [newAddress, setNewAddress] = useState('');
+  const [newDomain,  setNewDomain]  = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const addAddress = async () => {
+    const val = newAddress.trim().toLowerCase();
+    // Require at least one character before and after a single @
+    const atIdx = val.indexOf('@');
+    if (!val || atIdx < 1 || atIdx === val.length - 1) return;
+    setSaving(true);
+    try {
+      await addToImageWhitelist({ type: 'address', value: val });
+      setNewAddress('');
+    } catch {
+      addNotification({ title: t('message.whitelistFail.title'), body: t('message.whitelistFail.body') });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeAddress = async (addr) => {
+    setSaving(true);
+    try {
+      await setImageWhitelist({
+        ...imageWhitelist,
+        addresses: (imageWhitelist.addresses || []).filter(a => a !== addr),
+      });
+    } catch {
+      addNotification({ title: t('message.whitelistFail.title'), body: t('message.whitelistFail.body') });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addDomain = async () => {
+    const val = newDomain.trim().toLowerCase().replace(/^@/, '');
+    if (!val || val.includes('@')) return;
+    setSaving(true);
+    try {
+      await addToImageWhitelist({ type: 'domain', value: val });
+      setNewDomain('');
+    } catch {
+      addNotification({ title: t('message.whitelistFail.title'), body: t('message.whitelistFail.body') });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeDomain = async (domain) => {
+    setSaving(true);
+    try {
+      await setImageWhitelist({
+        ...imageWhitelist,
+        domains: (imageWhitelist.domains || []).filter(d => d !== domain),
+      });
+    } catch {
+      addNotification({ title: t('message.whitelistFail.title'), body: t('message.whitelistFail.body') });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const sectionHead = { fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 };
+  const pill = {
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
+    borderRadius: 20, padding: '3px 10px 3px 12px', fontSize: 12,
+    color: 'var(--text-secondary)',
+  };
+  const addRow = { display: 'flex', gap: 8, marginTop: 10 };
+
+  return (
+    <div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>{t('admin.privacy.title')}</div>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', marginBottom: 24 }}>
+        {t('admin.privacy.description')}
+      </div>
+
+      {/* Toggle */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '14px 16px', background: 'var(--bg-secondary)',
+        border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-medium)', marginBottom: 24,
+      }}>
+        <div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)' }}>{t('admin.privacy.blockImages')}</div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 3 }}>
+            {t('admin.privacy.blockImagesDesc')}
+          </div>
+        </div>
+        <MaterialButton aria-label={t('admin.privacy.blockImages')} aria-checked={blockRemoteImages} role="switch" variant="switch" selected={blockRemoteImages}
+          onClick={async () => {
+            try { await setBlockRemoteImages(!blockRemoteImages); }
+            catch { addNotification({ title: t('message.whitelistFail.title') }); }
+          }}
+          style={{
+            width: 42, height: 24, borderRadius: 'var(--md-sys-shape-corner-medium)', border: 'none', cursor: 'pointer',
+            background: blockRemoteImages ? 'var(--accent)' : TOGGLE_OFF_BACKGROUND,
+            position: 'relative', transition: 'background 0.2s', flexShrink: 0,
+          }}
+        >
+          <span style={{
+            position: 'absolute', top: 3, width: 18, height: 18, borderRadius: '50%',
+            background: 'white', transition: 'left 0.2s',
+            left: blockRemoteImages ? 21 : 3,
+          }} />
+        </MaterialButton>
+      </div>
+
+      {blockRemoteImages && (
+        <>
+          {/* Allowed senders */}
+          <div style={{ marginBottom: 24 }}>
+            <div style={sectionHead}>{t('admin.privacy.allowedSenders')}</div>
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginBottom: 10 }}>
+              {t('admin.privacy.allowedSendersDesc')}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {(imageWhitelist.addresses || []).length === 0 && (
+                <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)' }}>{t('admin.privacy.sendersEmpty')}</span>
+              )}
+              {(imageWhitelist.addresses || []).map(addr => (
+                <span key={addr} style={pill}>
+                  {addr}
+                  <MaterialButton variant="icon" onClick={() => removeAddress(addr)} disabled={saving} style={{
+                    background: 'none', border: 'none', cursor: saving ? 'default' : 'pointer',
+                    color: 'var(--text-tertiary)', padding: 0, lineHeight: 1,
+                    display: 'flex', alignItems: 'center',
+                  }}>
+                    <MaterialIcon name="close" />
+                  </MaterialButton>
+                </span>
+              ))}
+            </div>
+            <div style={addRow}>
+              <MaterialInput
+                value={newAddress}
+                onChange={e => setNewAddress(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && !saving && addAddress()}
+                placeholder={t('admin.privacy.addSenderPh')}
+                style={{ ...inputStyle, flex: 1, maxWidth: 280 }}
+              />
+              <MaterialButton variant="filled" onClick={addAddress} disabled={saving} style={{
+                padding: '8px 14px', background: 'var(--accent)', border: 'none',
+                borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--accent-text)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
+                cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1,
+              }}>{t('common.add')}</MaterialButton>
+            </div>
+          </div>
+
+          {/* Allowed domains */}
+          <div>
+            <div style={sectionHead}>{t('admin.privacy.allowedDomains')}</div>
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginBottom: 10 }}>
+              {t('admin.privacy.allowedDomainsDesc')}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {(imageWhitelist.domains || []).length === 0 && (
+                <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)' }}>{t('admin.privacy.domainsEmpty')}</span>
+              )}
+              {(imageWhitelist.domains || []).map(domain => (
+                <span key={domain} style={pill}>
+                  @{domain}
+                  <MaterialButton variant="icon" onClick={() => removeDomain(domain)} disabled={saving} style={{
+                    background: 'none', border: 'none', cursor: saving ? 'default' : 'pointer',
+                    color: 'var(--text-tertiary)', padding: 0, lineHeight: 1,
+                    display: 'flex', alignItems: 'center',
+                  }}>
+                    <MaterialIcon name="close" />
+                  </MaterialButton>
+                </span>
+              ))}
+            </div>
+            <div style={addRow}>
+              <MaterialInput
+                value={newDomain}
+                onChange={e => setNewDomain(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && !saving && addDomain()}
+                placeholder={t('admin.privacy.addDomainPh')}
+                style={{ ...inputStyle, flex: 1, maxWidth: 280 }}
+              />
+              <MaterialButton variant="filled" onClick={addDomain} disabled={saving} style={{
+                padding: '8px 14px', background: 'var(--accent)', border: 'none',
+                borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--accent-text)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
+                cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1,
+              }}>{t('common.add')}</MaterialButton>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Security Tab (TOTP 2FA) ──────────────────────────────────────────────────
+// Screen lock — personal PIN + auto-lock (#235). Self-contained so it doesn't touch
+// SecurityTab's existing state/logic.
+function ScreenLockSection() {
+  const { t } = useTranslation();
+  const { user, setUser, autoLockMinutes, setAutoLockMinutes } = useStore();
+  const hasPin = !!user?.hasLockPin;
+  const [mode, setMode] = useState(null); // null | 'set' | 'change' | 'remove'
+  const [currentPin, setCurrentPin] = useState('');
+  const [pin, setPin] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  const digits = (v) => v.replace(/\D/g, '').slice(0, 6);
+  const reset = () => { setMode(null); setCurrentPin(''); setPin(''); setConfirm(''); setError(''); setSaved(false); };
+
+  async function savePin() {
+    if (pin.length < 4) { setError(t('admin.lock.pinLength')); return; }
+    if (pin !== confirm) { setError(t('admin.lock.pinMismatch')); return; }
+    setBusy(true); setError('');
+    try {
+      await api.setLockPin(pin, hasPin ? currentPin : undefined);
+      setUser({ ...user, hasLockPin: true });
+      reset(); setSaved(true); setTimeout(() => setSaved(false), 2500);
+    } catch (e) { setError(e?.message || t('admin.lock.saveFailed')); }
+    finally { setBusy(false); }
+  }
+
+  async function removePin() {
+    setBusy(true); setError('');
+    try {
+      await api.removeLockPin(currentPin);
+      setUser({ ...user, hasLockPin: false });
+      if (autoLockMinutes) setAutoLockMinutes(0); // no PIN → auto-lock can't unlock
+      reset();
+    } catch (e) { setError(e?.message || t('admin.lock.saveFailed')); }
+    finally { setBusy(false); }
+  }
+
+  const inputStyle = { width: '100%', padding: '8px 10px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 14, letterSpacing: '0.2em', textAlign: 'center', boxSizing: 'border-box' };
+  const btn = (primary) => ({ padding: '7px 14px', borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: busy ? 'default' : 'pointer', border: primary ? 'none' : '1px solid var(--border)', background: primary ? 'var(--accent)' : 'var(--bg-tertiary)', color: primary ? 'var(--accent-text)' : 'var(--text-primary)', opacity: busy ? 0.6 : 1 });
+
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>{t('admin.lock.title')}</div>
+      <p style={{ margin: '0 0 12px', fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', lineHeight: 1.5 }}>{t('admin.lock.description')}</p>
+
+      <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', padding: 14, marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <span style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-primary)' }}>{hasPin ? t('admin.lock.pinSet') : t('admin.lock.pinNotSet')}</span>
+          {!mode && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              {!hasPin && <MaterialButton variant="text" type="button" style={btn(true)} onClick={() => setMode('set')}>{t('admin.lock.setPin')}</MaterialButton>}
+              {hasPin && <MaterialButton variant="text" type="button" style={btn(false)} onClick={() => setMode('change')}>{t('admin.lock.changePin')}</MaterialButton>}
+              {hasPin && <MaterialButton variant="text" type="button" style={{ ...btn(false), color: 'var(--red)', borderColor: 'var(--red)' }} onClick={() => setMode('remove')}>{t('admin.lock.removePin')}</MaterialButton>}
+            </div>
+          )}
+        </div>
+
+        {(mode === 'set' || mode === 'change') && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+            {mode === 'change' && <MaterialInput type="password" inputMode="numeric" autoComplete="off" placeholder={t('admin.lock.currentPin')} value={currentPin} onChange={e => setCurrentPin(digits(e.target.value))} style={inputStyle} />}
+            <MaterialInput type="password" inputMode="numeric" autoComplete="off" placeholder={t('admin.lock.newPin')} value={pin} onChange={e => setPin(digits(e.target.value))} style={inputStyle} />
+            <MaterialInput type="password" inputMode="numeric" autoComplete="off" placeholder={t('admin.lock.confirmPin')} value={confirm} onChange={e => setConfirm(digits(e.target.value))} style={inputStyle} />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <MaterialButton variant="text" type="button" style={btn(false)} onClick={reset} disabled={busy}>{t('common.cancel')}</MaterialButton>
+              <MaterialButton variant="text" type="button" style={btn(true)} onClick={savePin} disabled={busy}>{t('common.save')}</MaterialButton>
+            </div>
+          </div>
+        )}
+
+        {mode === 'remove' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+            <MaterialInput type="password" inputMode="numeric" autoComplete="off" placeholder={t('admin.lock.currentPin')} value={currentPin} onChange={e => setCurrentPin(digits(e.target.value))} style={inputStyle} />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <MaterialButton variant="text" type="button" style={btn(false)} onClick={reset} disabled={busy}>{t('common.cancel')}</MaterialButton>
+              <MaterialButton variant="text" type="button" style={{ ...btn(true), background: 'var(--red)' }} onClick={removePin} disabled={busy}>{t('admin.lock.removePin')}</MaterialButton>
+            </div>
+          </div>
+        )}
+
+        {error && <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--red)', marginTop: 8 }}>{error}</div>}
+        {saved && <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--green)', marginTop: 8 }}>{t('admin.lock.saved')}</div>}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-primary)' }}>{t('admin.lock.autoLock')}</div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)' }}>{hasPin ? t('admin.lock.autoLockDesc') : t('admin.lock.autoLockNeedsPin')}</div>
+        </div>
+        <MaterialSelect aria-label={t('admin.lock.autoLock')} value={autoLockMinutes} disabled={!hasPin} onChange={e => setAutoLockMinutes(Number(e.target.value))}
+          style={{ padding: '7px 9px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--text-primary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>
+          <option value={0}>{t('admin.lock.autoLockOff')}</option>
+          <option value={1}>{t('admin.lock.autoLockMin', { n: 1 })}</option>
+          <option value={5}>{t('admin.lock.autoLockMin', { n: 5 })}</option>
+          <option value={15}>{t('admin.lock.autoLockMin', { n: 15 })}</option>
+          <option value={30}>{t('admin.lock.autoLockMin', { n: 30 })}</option>
+        </MaterialSelect>
+      </div>
+    </div>
+  );
+}
+
+function SecurityTab() {
+  const { t } = useTranslation();
+  const { user, setUser } = useStore();
+  const [step, setStep] = useState('idle'); // 'idle' | 'scan' | 'verify'
+  const [setupData, setSetupData] = useState(null); // { qrCode, secret }
+  const [verifyCode, setVerifyCode] = useState('');
+  const [showDisable, setShowDisable] = useState(false);
+  const [disablePassword, setDisablePassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const totpEnabled = user?.totpEnabled;
+
+  // Admin-only: login protection settings
+  const [maxAttempts, setMaxAttempts] = useState(10);
+  const [windowMins, setWindowMins] = useState(15);
+  const [protectionSaving, setProtectionSaving] = useState(false);
+  const [protectionSaved, setProtectionSaved] = useState(false);
+  const [protectionError, setProtectionError] = useState('');
+
+  // Admin-only: self-hosted mail server policy
+  const [allowPrivateHosts, setAllowPrivateHosts] = useState(false);
+  const [allowInsecureTls, setAllowInsecureTls] = useState(false);
+  const [allowNonstandardPorts, setAllowNonstandardPorts] = useState(false);
+
+  // Admin-only: MFA enforcement policy
+  const [mfaEnforcement, setMfaEnforcement] = useState('off');
+  const [mfaDeviceTrust, setMfaDeviceTrust] = useState('30d');
+  const [mfaSaving, setMfaSaving] = useState(false);
+  const [mfaSaved, setMfaSaved] = useState(false);
+  const [mfaError, setMfaError] = useState('');
+  const [ssoPasswordLocked, setSsoPasswordLocked] = useState(false);
+
+  // Personal: recovery email for email-OTP fallback
+  const [recoveryEmail, setRecoveryEmail] = useState('');
+  const [recoveryEmailLoaded, setRecoveryEmailLoaded] = useState('');
+  const [recoverySaving, setRecoverySaving] = useState(false);
+  const [recoverySaved, setRecoverySaved] = useState(false);
+  const [recoveryError, setRecoveryError] = useState('');
+  const [recoveryReauth, setRecoveryReauth] = useState(null);
+  const [recoveryOidc, setRecoveryOidc] = useState(null);
+  const [recoveryPassword, setRecoveryPassword] = useState('');
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const recoveryInitialised = useRef(false);
+  const recoveryBusy = useRef(false);
+  const recoveryDraftKey = `mailflow_recovery_email_draft:${user?.id || ''}`;
+  const recoveryLoadFailure = t('admin.security.recoveryLoadFailed');
+
+
+  // Admin-only: auth activity log
+  const [authEvents, setAuthEvents] = useState([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+
+  useEffect(() => {
+    if (user?.isAdmin) {
+      api.admin.getSettings()
+        .then(d => {
+          if (d.settings.auth_max_attempts) setMaxAttempts(parseInt(d.settings.auth_max_attempts));
+          if (d.settings.auth_window_minutes) setWindowMins(parseInt(d.settings.auth_window_minutes));
+          setAllowPrivateHosts(d.settings.allow_private_hosts === 'true');
+          setAllowInsecureTls(d.settings.allow_insecure_tls === 'true');
+          setAllowNonstandardPorts(d.settings.allow_nonstandard_ports === 'true');
+          if (d.settings.mfa_enforcement) setMfaEnforcement(d.settings.mfa_enforcement);
+          if (d.settings.mfa_device_trust) setMfaDeviceTrust(d.settings.mfa_device_trust);
+          if (d.settings.internal_auth_disabled === 'true') {
+            api.admin.oidc.getProviders()
+              .then(pd => setSsoPasswordLocked(pd.providers.some(p => p.enabled)))
+              .catch(console.error);
+          }
+        })
+        .catch(console.error);
+      loadAuthEvents();
+    }
+    let active = true;
+    setRecoveryReauth(null);
+    setRecoveryPassword('');
+    setRecoveryCode('');
+    api.getRecoveryEmail()
+      .then(d => {
+        if (!active) return;
+        if (!recoveryInitialised.current) {
+          let draft = null;
+          try { draft = sessionStorage.getItem(recoveryDraftKey); sessionStorage.removeItem(recoveryDraftKey); } catch { /* unavailable */ }
+          setRecoveryEmail(draft ?? (d.email || ''));
+          recoveryInitialised.current = true;
+        }
+        setRecoveryEmailLoaded(d.email || '');
+        setRecoveryReauth(d.reauth ?? null);
+        setRecoveryOidc(d.oidc ?? null);
+      })
+      .catch(() => { if (active) setRecoveryError(recoveryLoadFailure); });
+    return () => { active = false; };
+  }, [user?.isAdmin, totpEnabled, recoveryLoadFailure, recoveryDraftKey]);
+
+  const loadAuthEvents = () => {
+    setEventsLoading(true);
+    api.admin.getAuthEvents({ limit: 100, offset: 0 })
+      .then(d => setAuthEvents(d.events))
+      .catch(console.error)
+      .finally(() => setEventsLoading(false));
+  };
+
+  const saveProtection = async () => {
+    const attempts = parseInt(maxAttempts);
+    const mins = parseInt(windowMins);
+    if (!Number.isInteger(attempts) || attempts < 1 || attempts > 100) {
+      setProtectionError(t('admin.security.maxAttempts') + ': 1–100');
+      return;
+    }
+    if (!Number.isInteger(mins) || mins < 1 || mins > 1440) {
+      setProtectionError(t('admin.security.windowMinutes') + ': 1–1440');
+      return;
+    }
+    setProtectionSaving(true);
+    setProtectionError('');
+    try {
+      await api.admin.updateSettings({ auth_max_attempts: attempts, auth_window_minutes: mins });
+      setProtectionSaved(true);
+      setTimeout(() => setProtectionSaved(false), 3000);
+    } catch (err) {
+      setProtectionError(err.message);
+    } finally {
+      setProtectionSaving(false);
+    }
+  };
+
+  const toggleMailPolicy = async (key, newVal) => {
+    await api.admin.updateSettings({ [key]: newVal }).catch(console.error);
+  };
+
+  const saveMfaSettings = async () => {
+    setMfaSaving(true);
+    setMfaError('');
+    try {
+      await api.admin.updateSettings({ mfa_enforcement: mfaEnforcement, mfa_device_trust: mfaDeviceTrust });
+      setMfaSaved(true);
+      setTimeout(() => setMfaSaved(false), 3000);
+    } catch (err) {
+      setMfaError(err.message);
+    } finally {
+      setMfaSaving(false);
+    }
+  };
+
+  const recoveryChanging = recoveryEmail.trim() !== recoveryEmailLoaded;
+  const recoveryOidcConfirmed = recoveryReauth === 'oidc' && !!recoveryOidc?.confirmedUntil && new Date(recoveryOidc.confirmedUntil).getTime() > Date.now();
+  const recoveryAsksCode = recoveryReauth === 'totp' || (recoveryReauth === 'oidc' && recoveryOidc?.totpToo === true && recoveryOidcConfirmed);
+  const recoveryConfirmed = recoveryReauth === 'password' ? !!recoveryPassword
+    : recoveryReauth === 'totp' ? recoveryCode.length === 6
+      : recoveryReauth === 'oidc' ? recoveryOidcConfirmed && (!recoveryAsksCode || recoveryCode.length === 6) : false;
+  const recoveryCanSave = !recoverySaving && recoveryChanging && recoveryConfirmed;
+
+  const saveRecoveryEmail = async event => {
+    event.preventDefault();
+    if (!recoveryCanSave || recoveryBusy.current) return;
+    recoveryBusy.current = true;
+    setRecoverySaving(true);
+    setRecoverySaved(false);
+    setRecoveryError('');
+    const email = recoveryEmail.trim();
+    let saved = false;
+    try {
+      await api.updateRecoveryEmail(email || null, {
+        ...(recoveryAsksCode ? { totpCode: recoveryCode } : {}),
+        ...(recoveryReauth === 'password' ? { password: recoveryPassword } : {}),
+      });
+      saved = true;
+      setRecoveryEmailLoaded(email);
+      setRecoverySaved(true);
+      setTimeout(() => setRecoverySaved(false), 3000);
+    } catch (err) {
+      setRecoveryError(err.message);
+    } finally {
+      // A confirmation can be spent by this change. Refetch before enabling another save.
+      setRecoveryReauth(null);
+      setRecoveryOidc(null);
+      setRecoveryPassword('');
+      setRecoveryCode('');
+      try {
+        const next = await api.getRecoveryEmail();
+        setRecoveryReauth(next.reauth ?? null);
+        setRecoveryOidc(next.oidc ?? null);
+        setRecoveryEmailLoaded(next.email || '');
+        if (saved) setRecoveryEmail(next.email || '');
+      } catch {
+        setRecoveryError(error => [error, t('admin.security.recoveryLoadFailed')].filter(Boolean).join(' '));
+      }
+      recoveryBusy.current = false;
+      setRecoverySaving(false);
+    }
+  };
+
+  const eventLabel = (type) => {
+    const map = {
+      login_success: t('admin.security.eventLoginSuccess'),
+      login_fail:    t('admin.security.eventLoginFail'),
+      totp_success:  t('admin.security.eventTotpSuccess'),
+      totp_fail:     t('admin.security.eventTotpFail'),
+      sso_login:     t('admin.security.eventSsoLogin'),
+      admin_password_set: t('admin.security.eventAdminPasswordSet'),
+      admin_user_update:  t('admin.security.eventAdminUserUpdate'),
+      admin_totp_disable: t('admin.security.eventAdminTotpDisable'),
+      admin_user_delete:  t('admin.security.eventAdminUserDelete'),
+      identity_linked:    t('admin.security.eventIdentityLinked'),
+      identity_unlinked:  t('admin.security.eventIdentityUnlinked'),
+      api_token_created:   t('admin.security.eventApiTokenCreated'),
+      api_token_revoked:   t('admin.security.eventApiTokenRevoked'),
+      api_token_auth_fail: t('admin.security.eventApiTokenAuthFail'),
+      admin_sign_in_code: t('admin.security.eventAdminSignInCode'),
+    };
+    return map[type] || type;
+  };
+
+  const startSetup = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await api.totp.setup();
+      setSetupData(data);
+      setStep('scan');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const verifyEnable = async (e) => {
+    e.preventDefault();
+    if (verifyCode.length !== 6) return;
+    setLoading(true);
+    setError('');
+    try {
+      await api.totp.enable(verifyCode);
+      setUser({ ...user, totpEnabled: true });
+      setStep('idle');
+      setSetupData(null);
+      setVerifyCode('');
+      setSuccess(t('admin.security.totpSuccess'));
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (err) {
+      setError(err.message);
+      setVerifyCode('');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const disableTotp = async (e) => {
+    e.preventDefault();
+    if (!disablePassword) return;
+    setLoading(true);
+    setError('');
+    try {
+      await api.totp.disable(disablePassword);
+      setUser({ ...user, totpEnabled: false });
+      setShowDisable(false);
+      setDisablePassword('');
+      setSuccess(t('admin.security.totpDisabledSuccess'));
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (err) {
+      setError(err.message);
+      setDisablePassword('');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const cancelSetup = () => {
+    setStep('idle');
+    setSetupData(null);
+    setVerifyCode('');
+    setError('');
+  };
+
+  return (
+    <div style={{ maxWidth: 520 }}>
+      <h2 style={{ margin: '0 0 4px', fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)' }}>{t('admin.security.title')}</h2>
+      <p style={{ margin: '0 0 28px', fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)' }}>
+        {t('admin.security.description')}
+      </p>
+
+      <ScreenLockSection />
+
+      {/* Login Protection — admin only */}
+      {user?.isAdmin && (
+        <div style={{
+          background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+          borderRadius: 'var(--md-sys-shape-corner-medium)', padding: '20px 24px', marginBottom: 20,
+        }}>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+            {t('admin.security.loginProtectionTitle')}
+          </div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginBottom: 16 }}>
+            {t('admin.security.loginProtectionDesc')}
+          </div>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 5 }}>
+                {t('admin.security.maxAttempts')}
+              </label>
+              <MaterialInput aria-label={t('admin.security.maxAttempts')}
+                type="number" min="1" max="100" value={maxAttempts}
+                onChange={e => setMaxAttempts(e.target.value)}
+                style={{ ...inputStyle, width: '100%' }}
+                
+                
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)', marginBottom: 5 }}>
+                {t('admin.security.windowMinutes')}
+              </label>
+              <MaterialInput aria-label={t('admin.security.windowMinutes')}
+                type="number" min="1" max="1440" value={windowMins}
+                onChange={e => setWindowMins(e.target.value)}
+                style={{ ...inputStyle, width: '100%' }}
+                
+                
+              />
+            </div>
+          </div>
+          {protectionError && (
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--red)', marginBottom: 8 }}>{protectionError}</div>
+          )}
+          <MaterialButton variant="filled"
+            onClick={saveProtection}
+            disabled={protectionSaving}
+            style={{
+              padding: '8px 18px', background: protectionSaved ? 'rgba(34,197,94,0.15)' : 'var(--accent)',
+              border: protectionSaved ? '1px solid rgba(34,197,94,0.4)' : 'none',
+              borderRadius: 'var(--md-sys-shape-corner-small)', color: protectionSaved ? 'var(--green)' : 'white',
+              fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
+              cursor: protectionSaving ? 'not-allowed' : 'pointer', opacity: protectionSaving ? 0.6 : 1,
+            }}
+          >
+            {protectionSaving
+              ? t('admin.security.savingProtection')
+              : protectionSaved
+                ? t('admin.security.protectionSaved')
+                : t('admin.security.saveProtection')}
+          </MaterialButton>
+        </div>
+      )}
+
+      {/* Mail server connection policy — admin only */}
+      {user?.isAdmin && (
+        <div style={{
+          background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+          borderRadius: 'var(--md-sys-shape-corner-medium)', padding: '20px 24px', marginBottom: 20,
+        }}>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+            {t('admin.security.mailPolicyTitle')}
+          </div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)', marginBottom: 16 }}>
+            {t('admin.security.mailPolicyDesc')}
+          </div>
+          {[
+            { key: 'allow_private_hosts',     val: allowPrivateHosts,     set: setAllowPrivateHosts,     label: t('admin.security.allowPrivateHosts'),     desc: t('admin.security.allowPrivateHostsDesc') },
+            { key: 'allow_insecure_tls',      val: allowInsecureTls,      set: setAllowInsecureTls,      label: t('admin.security.allowInsecureTls'),      desc: t('admin.security.allowInsecureTlsDesc') },
+            { key: 'allow_nonstandard_ports', val: allowNonstandardPorts, set: setAllowNonstandardPorts, label: t('admin.security.allowNonstandardPorts'), desc: t('admin.security.allowNonstandardPortsDesc') },
+          ].map(({ key, val, set, label, desc }) => (
+            <div className="admin-setting-toggle admin-setting-support" key={key} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 14 }}>
+              <MaterialButton aria-label={label} aria-checked={val} role="switch" variant="switch"
+                type="button"
+                onClick={() => { const newVal = !val; set(newVal); toggleMailPolicy(key, newVal); }}
+                style={{
+                  width: 36, height: 20, borderRadius: 'var(--md-sys-shape-corner-medium)', border: 'none', cursor: 'pointer', padding: 0,
+                  background: val ? 'var(--amber)' : TOGGLE_OFF_BACKGROUND,
+                  position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginTop: 1,
+                }}
+              >
+                <span style={{
+                  position: 'absolute', top: 2, left: val ? 18 : 2, width: 16, height: 16,
+                  borderRadius: '50%', background: 'white', transition: 'left 0.2s',
+                }} />
+              </MaterialButton>
+              <div>
+                <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>{label}</div>
+                <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginTop: 2 }}>{desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Status card */}
+      <div style={{
+        background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+        borderRadius: 'var(--md-sys-shape-corner-medium)', padding: '20px 24px', marginBottom: 20,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              width: 40, height: 40, borderRadius: 'var(--md-sys-shape-corner-medium)',
+              background: totpEnabled ? 'rgba(34,197,94,0.12)' : 'var(--bg-tertiary)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            }}>
+              <MaterialIcon name="lock" />
+            </div>
+            <div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)' }}>
+                {t('admin.security.totpTitle')}
+              </div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: totpEnabled ? 'var(--green)' : 'var(--text-tertiary)', marginTop: 2 }}>
+                {totpEnabled ? t('admin.security.totpEnabled') : t('admin.security.totpNotConfigured')}
+              </div>
+            </div>
+          </div>
+          {!totpEnabled && step === 'idle' && (
+            <MaterialButton variant="filled"
+              onClick={startSetup}
+              disabled={loading}
+              style={{
+                padding: '8px 16px', background: 'var(--accent)', border: 'none',
+                borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--accent-text)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
+                cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1,
+                flexShrink: 0,
+              }}
+            >
+              {loading ? t('admin.security.totpSetupLoading') : t('admin.security.totpSetup')}
+            </MaterialButton>
+          )}
+          {totpEnabled && !showDisable && (
+            <MaterialButton variant="outlined"
+              onClick={() => { setShowDisable(true); setError(''); }}
+              style={{
+                padding: '8px 16px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
+                borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--red)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
+                cursor: 'pointer', flexShrink: 0,
+              }}
+            >
+              {t('admin.security.totpDisable')}
+            </MaterialButton>
+          )}
+        </div>
+
+        {/* Setup: scan QR */}
+        {step === 'scan' && setupData && (
+          <div style={{ marginTop: 24, borderTop: '1px solid var(--border)', paddingTop: 20 }}>
+            <p style={{ margin: '0 0 16px', fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>
+              {t('admin.security.totpScanInstructions')}
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+              <img
+                src={setupData.qrCode}
+                alt={t('admin.security.qrCodeAlt')}
+                style={{ width: 180, height: 180, borderRadius: 'var(--md-sys-shape-corner-small)', background: 'white', padding: 8 }}
+              />
+            </div>
+            <p style={{ margin: '0 0 6px', fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', textAlign: 'center' }}>
+              {t('admin.security.totpManualKey')}
+            </p>
+            <div style={{
+              fontFamily: 'monospace', fontSize: 'var(--md-sys-typescale-body-medium-size)', letterSpacing: '0.1em',
+              color: 'var(--text-secondary)', textAlign: 'center',
+              background: 'var(--bg-tertiary)', borderRadius: 'var(--md-sys-shape-corner-small)', padding: '8px 12px',
+              marginBottom: 20, wordBreak: 'break-all',
+            }}>
+              {setupData.secret}
+            </div>
+            <MaterialButton variant="filled"
+              onClick={() => setStep('verify')}
+              style={{
+                width: '100%', padding: '10px', background: 'var(--accent)', border: 'none',
+                borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--accent-text)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, cursor: 'pointer',
+              }}
+            >
+              {t('admin.security.totpNext')}
+            </MaterialButton>
+            <MaterialButton variant="text"
+              onClick={cancelSetup}
+              style={{
+                width: '100%', padding: '8px', background: 'none', border: 'none',
+                color: 'var(--text-tertiary)', fontSize: 'var(--md-sys-typescale-body-medium-size)', cursor: 'pointer', marginTop: 8,
+              }}
+            >
+              {t('common.cancel')}
+            </MaterialButton>
+          </div>
+        )}
+
+        {/* Setup: verify code */}
+        {step === 'verify' && (
+          <div style={{ marginTop: 24, borderTop: '1px solid var(--border)', paddingTop: 20 }}>
+            <p style={{ margin: '0 0 16px', fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>
+              {t('admin.security.totpVerifyInstructions')}
+            </p>
+            <form onSubmit={verifyEnable} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <MaterialInput
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={verifyCode}
+                onChange={e => setVerifyCode(e.target.value.replace(/\D/g, ''))}
+                autoFocus
+                placeholder={t('admin.security.totpVerifyPh')}
+                style={{
+                  width: '100%', padding: '12px 14px',
+                  background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
+                  borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--text-primary)', fontSize: 'var(--md-sys-typescale-title-large-size)',
+                  letterSpacing: '0.3em', textAlign: 'center',
+                  outline: 'none', boxSizing: 'border-box', fontVariantNumeric: 'tabular-nums',
+                }}
+                
+                
+              />
+              <MaterialButton variant="filled"
+                type="submit"
+                disabled={loading || verifyCode.length !== 6}
+                style={{
+                  padding: '10px', background: 'var(--accent)', border: 'none',
+                  borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--accent-text)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
+                  cursor: loading || verifyCode.length !== 6 ? 'not-allowed' : 'pointer',
+                  opacity: loading || verifyCode.length !== 6 ? 0.6 : 1,
+                }}
+              >
+                {loading ? t('admin.security.totpVerifyLoading') : t('admin.security.totpVerifyButton')}
+              </MaterialButton>
+              <MaterialButton variant="text"
+                type="button"
+                onClick={() => setStep('scan')}
+                style={{
+                  background: 'none', border: 'none', color: 'var(--text-tertiary)',
+                  fontSize: 'var(--md-sys-typescale-body-medium-size)', cursor: 'pointer', padding: 0,
+                }}
+              >
+                {t('admin.security.totpBack')}
+              </MaterialButton>
+            </form>
+          </div>
+        )}
+
+        {/* Disable flow */}
+        {showDisable && (
+          <div style={{ marginTop: 24, borderTop: '1px solid var(--border)', paddingTop: 20 }}>
+            <p style={{ margin: '0 0 16px', fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-secondary)' }}>
+              {t('admin.security.totpDisableInstructions')}
+            </p>
+            <form onSubmit={disableTotp} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <MaterialInput
+                type="password"
+                autoComplete="current-password"
+                value={disablePassword}
+                onChange={e => setDisablePassword(e.target.value)}
+                autoFocus
+                placeholder={t('admin.security.totpDisablePh')}
+                style={{ ...inputStyle }}
+                
+                
+              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <MaterialButton variant="text"
+                  type="submit"
+                  disabled={loading || !disablePassword}
+                  style={{
+                    flex: 1, padding: '10px', background: 'var(--red)', border: 'none',
+                    borderRadius: 'var(--md-sys-shape-corner-small)', color: 'white', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
+                    cursor: loading || !disablePassword ? 'not-allowed' : 'pointer',
+                    opacity: loading || !disablePassword ? 0.6 : 1,
+                  }}
+                >
+                  {loading ? t('admin.security.totpDisableLoading') : t('admin.security.totpDisableConfirm')}
+                </MaterialButton>
+                <MaterialButton variant="outlined"
+                  type="button"
+                  onClick={() => { setShowDisable(false); setDisablePassword(''); setError(''); }}
+                  style={{
+                    padding: '10px 16px', background: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)',
+                    color: 'var(--text-secondary)', fontSize: 'var(--md-sys-typescale-body-medium-size)', cursor: 'pointer',
+                  }}
+                >
+                  {t('common.cancel')}
+                </MaterialButton>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* Error / success */}
+        {error && (
+          <div style={{
+            marginTop: 12, padding: '10px 14px', background: 'rgba(248,113,113,0.1)',
+            border: '1px solid rgba(248,113,113,0.3)', borderRadius: 'var(--md-sys-shape-corner-small)',
+            color: 'var(--red)', fontSize: 'var(--md-sys-typescale-body-medium-size)',
+          }}>{error}</div>
+        )}
+        {success && (
+          <div style={{
+            marginTop: 12, padding: '10px 14px', background: 'rgba(34,197,94,0.1)',
+            border: '1px solid rgba(34,197,94,0.3)', borderRadius: 'var(--md-sys-shape-corner-small)',
+            color: 'var(--green)', fontSize: 'var(--md-sys-typescale-body-medium-size)',
+          }}>{success}</div>
+        )}
+      </div>
+
+      <ApiTokensSection />
+
+      {/* MFA enforcement — admin only */}
+      {user?.isAdmin && (
+        <div style={{
+          background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+          borderRadius: 'var(--md-sys-shape-corner-medium)', padding: '20px 24px', marginBottom: 20,
+        }}>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+            {t('admin.security.mfaEnforcementTitle')}
+          </div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginBottom: 12 }}>
+            {t('admin.security.mfaEnforcementDesc')}
+          </div>
+          {ssoPasswordLocked ? (
+            <div style={{
+              padding: '8px 12px', borderRadius: 'var(--md-sys-shape-corner-small)',
+              background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
+              fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)',
+            }}>
+              {t('admin.security.mfaSsoLockedNotice')}
+            </div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                {[
+                  { val: 'off', label: t('admin.security.mfaEnforcementOff') },
+                  { val: 'required', label: t('admin.security.mfaEnforcementRequired') },
+                ].map(({ val, label }) => (
+                  <MaterialButton variant="text" selected={mfaEnforcement === val}
+                    key={val}
+                    type="button"
+                    onClick={() => setMfaEnforcement(val)}
+                    style={{
+                      padding: '7px 16px', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, cursor: 'pointer',
+                      background: mfaEnforcement === val ? 'var(--accent)' : 'var(--bg-tertiary)',
+                      color: mfaEnforcement === val ? 'white' : 'var(--text-secondary)',
+                      border: mfaEnforcement === val ? 'none' : '1px solid var(--border)',
+                    }}
+                  >
+                    {label}
+                  </MaterialButton>
+                ))}
+              </div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)', marginBottom: 4 }}>
+                {t('admin.security.mfaDeviceTrustTitle')}
+              </div>
+              <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginBottom: 12 }}>
+                {t('admin.security.mfaDeviceTrustDesc')}
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+                {[
+                  { val: 'never', label: t('admin.security.mfaDeviceTrustNever') },
+                  { val: '7d', label: t('admin.security.mfaDeviceTrust7d') },
+                  { val: '30d', label: t('admin.security.mfaDeviceTrust30d') },
+                  { val: 'permanent', label: t('admin.security.mfaDeviceTrustForever') },
+                ].map(({ val, label }) => (
+                  <MaterialButton variant="text" selected={mfaDeviceTrust === val}
+                    key={val}
+                    type="button"
+                    onClick={() => setMfaDeviceTrust(val)}
+                    style={{
+                      padding: '7px 14px', borderRadius: 'var(--md-sys-shape-corner-small)', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, cursor: 'pointer',
+                      background: mfaDeviceTrust === val ? 'var(--accent)' : 'var(--bg-tertiary)',
+                      color: mfaDeviceTrust === val ? 'white' : 'var(--text-secondary)',
+                      border: mfaDeviceTrust === val ? 'none' : '1px solid var(--border)',
+                    }}
+                  >
+                    {label}
+                  </MaterialButton>
+                ))}
+              </div>
+              {mfaError && (
+                <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--red)', marginBottom: 8 }}>{mfaError}</div>
+              )}
+              <MaterialButton variant="filled"
+                onClick={saveMfaSettings}
+                disabled={mfaSaving}
+                style={{
+                  padding: '8px 18px', background: mfaSaved ? 'rgba(34,197,94,0.15)' : 'var(--accent)',
+                  border: mfaSaved ? '1px solid rgba(34,197,94,0.4)' : 'none',
+                  borderRadius: 'var(--md-sys-shape-corner-small)', color: mfaSaved ? 'var(--green)' : 'white',
+                  fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
+                  cursor: mfaSaving ? 'not-allowed' : 'pointer', opacity: mfaSaving ? 0.6 : 1,
+                }}
+              >
+                {mfaSaving ? t('admin.security.savingProtection') : mfaSaved ? t('admin.security.protectionSaved') : t('admin.security.saveProtection')}
+              </MaterialButton>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Recovery email — all users */}
+      <form onSubmit={saveRecoveryEmail} aria-labelledby="recovery-email-title" style={{
+        background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+        borderRadius: 'var(--md-sys-shape-corner-medium)', padding: '20px 24px', marginBottom: 20,
+      }}>
+        <label id="recovery-email-title" htmlFor="recovery-email" style={{ display: 'block', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+          {t('admin.security.recoveryEmailTitle')}
+        </label>
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginBottom: 14 }}>
+          {t('admin.security.recoveryEmailDesc')}
+        </div>
+        <MaterialInput
+          id="recovery-email" type="email" disabled={recoverySaving}
+          value={recoveryEmail}
+          onChange={e => setRecoveryEmail(e.target.value)}
+          placeholder={t('admin.security.recoveryEmailPh')}
+          style={{
+            width: '100%', padding: '8px 10px', borderRadius: 'var(--md-sys-shape-corner-small)',
+            border: '1px solid var(--border)', background: 'var(--bg-primary)',
+            color: 'var(--text-primary)', fontSize: 'var(--md-sys-typescale-body-medium-size)', outline: 'none',
+            boxSizing: 'border-box', marginBottom: 10,
+          }}
+          
+          
+        />
+        {recoveryChanging && recoveryReauth === 'password' && (
+          <div style={{ marginBottom: 10 }}>
+            <label className="md-field-label" htmlFor="recovery-confirm-password">{t('admin.security.recoveryConfirmPassword')}</label>
+            <PasswordInput id="recovery-confirm-password" autoComplete="current-password"
+              value={recoveryPassword} disabled={recoverySaving} onChange={e => setRecoveryPassword(e.target.value)} style={inputStyle} />
+          </div>
+        )}
+        {recoveryChanging && recoveryReauth === 'oidc' && !recoveryOidcConfirmed && (
+          <div style={{ marginBottom: 10 }}>
+            <p id="recovery-confirm-oidc-hint" style={{ color: 'var(--text-secondary)' }}>{t('admin.security.recoveryConfirmOidc')}</p>
+            {(recoveryOidc?.providers || []).length ? (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {recoveryOidc.providers.map(provider => (
+                  <a key={provider.slug} href={`/auth/oidc/${provider.slug}/start?action=reauth`}
+                    className="md-button" data-variant="outlined" aria-describedby="recovery-confirm-oidc-hint"
+                    onClick={() => { try { sessionStorage.setItem(recoveryDraftKey, recoveryEmail.trim()); } catch { /* unavailable */ } }}>
+                    {t('admin.apiTokens.reauthOidcButton', { provider: provider.name })}
+                  </a>
+                ))}
+              </div>
+            ) : <p>{t('admin.security.ssoLinkConfirmNoProvider')}</p>}
+          </div>
+        )}
+        {recoveryChanging && recoveryOidcConfirmed && <p role="status">{t('admin.apiTokens.reauthOidcDone', { time: formatTime(recoveryOidc.confirmedUntil) })}</p>}
+        {recoveryChanging && recoveryAsksCode && (
+          <div style={{ marginBottom: 10 }}>
+            <label className="md-field-label" htmlFor="recovery-confirm-code">{t('admin.security.recoveryConfirmTotp')}</label>
+            <MaterialInput id="recovery-confirm-code" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6}
+              value={recoveryCode} disabled={recoverySaving} onChange={e => setRecoveryCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder={t('admin.security.totpVerifyPh')} style={inputStyle} />
+          </div>
+        )}
+        {recoveryError && (
+          <div role="alert" style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--red)', marginBottom: 8 }}>{recoveryError}</div>
+        )}
+        <MaterialButton variant="filled"
+          type="submit"
+          disabled={!recoveryCanSave}
+          style={{
+            padding: '8px 18px',
+            background: recoverySaved ? 'rgba(34,197,94,0.15)' : 'var(--accent)',
+            border: recoverySaved ? '1px solid rgba(34,197,94,0.4)' : 'none',
+            borderRadius: 'var(--md-sys-shape-corner-small)', color: recoverySaved ? 'var(--green)' : 'white',
+            fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
+            cursor: !recoveryCanSave ? 'not-allowed' : 'pointer',
+            opacity: !recoveryCanSave ? 0.6 : 1,
+          }}
+        >
+          {recoverySaving ? t('common.saving') : recoverySaved ? t('admin.security.protectionSaved') : t('common.save')}
+        </MaterialButton>
+      </form>
+
+      <LinkedIdentitiesSection />
+
+      {/* Activity Log — admin only */}
+      {user?.isAdmin && (
+        <div style={{ marginTop: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 600, color: 'var(--text-primary)' }}>
+              {t('admin.security.activityTitle')}
+            </div>
+            <MaterialButton variant="outlined"
+              onClick={loadAuthEvents}
+              disabled={eventsLoading}
+              style={{
+                padding: '5px 12px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
+                borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--text-secondary)', fontSize: 'var(--md-sys-typescale-body-small-size)',
+                cursor: eventsLoading ? 'not-allowed' : 'pointer', opacity: eventsLoading ? 0.6 : 1,
+              }}
+            >
+              {t('admin.security.activityRefresh')}
+            </MaterialButton>
+          </div>
+          <div style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', marginBottom: 12 }}>
+            {t('admin.security.activityDesc')}
+          </div>
+          {eventsLoading ? (
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', padding: '12px 0' }}>
+              {t('admin.security.activityLoading')}
+            </div>
+          ) : authEvents.length === 0 ? (
+            <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)', padding: '12px 0' }}>
+              {t('admin.security.activityEmpty')}
+            </div>
+          ) : (
+            <div tabIndex={0} role="region" aria-label={t('admin.security.activityTitle')} style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--md-sys-typescale-body-small-size)' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                    {[
+                      t('admin.security.activityColTime'),
+                      t('admin.security.activityColEvent'),
+                      t('admin.security.activityColUser'),
+                      t('admin.security.activityColIP'),
+                      t('admin.security.activityColStatus'),
+                    ].map(h => (
+                      <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text-tertiary)', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {authEvents.map(ev => (
+                    <tr key={ev.id} style={{ borderBottom: '1px solid var(--border-subtle, var(--border))' }}>
+                      <td style={{ padding: '6px 8px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                        {formatDateTime(ev.created_at)}
+                      </td>
+                      <td style={{ padding: '6px 8px', color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
+                        {eventLabel(ev.event_type)}
+                        {/* Admin changes to a user: the User column is the account changed, this is who changed it. */}
+                        {ev.actor_username && (
+                          <span style={{ color: 'var(--text-secondary)' }}> {t('admin.security.byActor', { actor: ev.actor_username })}</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '6px 8px', color: 'var(--text-secondary)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {ev.username || '—'}
+                      </td>
+                      <td style={{ padding: '6px 8px', color: 'var(--text-secondary)', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                        {ev.ip || '—'}
+                      </td>
+                      <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
+                        <span style={{
+                          display: 'inline-block', padding: '2px 7px', borderRadius: 'var(--md-sys-shape-corner-medium)', fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 500,
+                          background: ev.success ? 'rgba(34,197,94,0.12)' : 'rgba(248,113,113,0.12)',
+                          color: ev.success ? 'var(--green)' : 'var(--red)',
+                        }}>
+                          {ev.success ? t('admin.security.activityAllowed') : t('admin.security.activityBlocked')}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const ssoProviderButtonStyle = {
+  padding: '7px 14px', borderRadius: 7, fontSize: 13, fontWeight: 500,
+  background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
+  color: 'var(--text-secondary)', textDecoration: 'none', cursor: 'pointer',
+  display: 'inline-flex', alignItems: 'center', gap: 6,
+};
+
+// The single sign-on identities linked to the account. Linking one more takes the confirmation
+// creating an API token does (#714): the server says which (GET /auth/oidc/identities answers
+// `reauth`) and POST /auth/oidc/link-confirm checks it before the browser goes to the provider.
+// `navigate` is how it goes there; a test passes its own, as jsdom cannot navigate.
+export function LinkedIdentitiesSection({ navigate = (url) => { window.location.href = url; } }) {
+  const { t } = useTranslation();
+  const [identities, setIdentities] = useState(null); // null = loading
+  const [providers, setProviders] = useState([]);
+  const [reauth, setReauth] = useState(null); // 'password' | 'totp' | 'oidc' | 'totpSetup'
+  const [oidc, setOidc] = useState(null); // with 'oidc': { providers, confirmedUntil }
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const [linking, setLinking] = useState(null); // the provider whose link waits for its confirmation
+  const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const [checking, setChecking] = useState(false);
+  const [linkError, setLinkError] = useState('');
+  const linkSequence = useRef(0);
+  useEffect(() => () => { linkSequence.current += 1; }, []);
+
+  const load = useCallback(() => Promise.all([
+    api.oidc.getIdentities(),
+    api.oidc.getProviders(),
+  ]).then(([idData, provData]) => {
+    setIdentities(idData.identities);
+    setReauth(idData.reauth ?? null);
+    setOidc(idData.oidc ?? null);
+    setProviders(provData.providers || []);
+  }).catch(() => setIdentities(ids => ids ?? [])), []);
+  useEffect(() => { load(); }, [load]);
+
+  // An account without password sign-in confirms with a sign-in just made through a provider it
+  // has (the buttons in the form below); the server says until when the last one counts.
+  const oidcProviders = Array.isArray(oidc?.providers) ? oidc.providers : [];
+  const oidcConfirmed = reauth === 'oidc' && !!oidc?.confirmedUntil && new Date(oidc.confirmedUntil) > new Date();
+  const totpToo = reauth === 'oidc' && oidc?.totpToo === true;
+  const asksCode = reauth === 'totp' || (totpToo && oidcConfirmed);
+  const canContinue = !checking && (asksCode ? code.length === 6 : reauth === 'password' ? !!password : false);
+
+  const openLinkForm = (provider) => { linkSequence.current += 1; setChecking(false); setLinking(provider); setPassword(''); setCode(''); setLinkError(''); };
+  const closeLinkForm = () => openLinkForm(null);
+
+  // The confirmation, then the provider: the link start spends what the server just recorded.
+  const confirmAndLink = async (provider, body) => {
+    const sequence = ++linkSequence.current;
+    setChecking(true);
+    setLinkError('');
+    try {
+      await api.oidc.confirmLink(body);
+      if (sequence !== linkSequence.current) return;
+      navigate(`/auth/oidc/${provider.slug}/start?action=link`);
+    } catch (err) {
+      if (sequence !== linkSequence.current) return;
+      setLinking(provider);
+      setLinkError(err.message);
+      // A code works once, and a refused password is typed again, as when turning 2FA off.
+      setPassword('');
+      setCode('');
+      setChecking(false);
+      // A refusal can mean what confirms a link changed: two-factor turned on, or the policy.
+      load();
+    }
+  };
+  // With a sign-in through single sign-on already made, there is nothing left to ask for.
+  const startLink = (provider) => (oidcConfirmed && !totpToo ? confirmAndLink(provider, {}) : openLinkForm(provider));
+  const submitLinkForm = (e) => {
+    e.preventDefault();
+    if (!canContinue) return;
+    confirmAndLink(linking, asksCode ? { totpCode: code } : { password });
+  };
+
+  const handleUnlink = (identity) => {
+    setConfirmDialog({
+      title: t('admin.security.ssoUnlinkTitle', { provider: identity.provider_name }),
+      message: t('admin.security.ssoUnlinkBody'),
+      confirmLabel: t('admin.security.ssoUnlinkConfirm'),
+      onConfirm: async () => {
+        await api.oidc.unlinkIdentity(identity.id);
+        setIdentities(ids => ids.filter(i => i.id !== identity.id));
+      },
+    });
+  };
+
+  // Providers not yet linked
+  const linkedProviderIds = new Set((identities || []).map(i => i.provider_slug));
+  const unlinkableProviders = providers.filter(p => !linkedProviderIds.has(p.slug));
+
+  if (identities === null) return null;
+
+  return (
+    <>
+      <div style={{
+        background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+        borderRadius: 12, padding: '20px 24px', marginTop: 16,
+      }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+          {t('admin.security.ssoTitle')}
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--text-tertiary)', marginBottom: 16 }}>
+          {t('admin.security.ssoDescription')}
+        </div>
+        {oidcConfirmed && (
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
+            {t('admin.security.ssoLinkConfirmed', { time: formatTime(oidc.confirmedUntil) })}
+          </div>
+        )}
+
+        {/* Linked identities */}
+        {identities.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+            {identities.map(identity => (
+              <div key={identity.id} style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '10px 14px', borderRadius: 8,
+                background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)' }}>
+                    {identity.provider_name}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {identity.email || identity.issuer}
+                  </div>
+                </div>
+                <MaterialButton
+                  onClick={() => handleUnlink(identity)}
+                  style={{
+                    padding: '5px 10px', fontSize: 12, borderRadius: 6, cursor: 'pointer',
+                    background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)',
+                    color: 'var(--red)', flexShrink: 0,
+                  }}
+                >
+                  {t('admin.security.ssoUnlink')}
+                </MaterialButton>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Link new provider: first its confirmation (#714), then the provider */}
+        {linking ? (
+          <form onSubmit={submitLinkForm} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {reauth === 'password' && (
+              <>
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>
+                  {t('admin.security.ssoLinkConfirmPassword', { provider: linking.name })}
+                </p>
+                <PasswordInput
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  autoFocus
+                  placeholder={t('admin.security.totpDisablePh')}
+                  style={{ ...inputStyle }}
+                  onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+                  onBlur={e => e.target.style.borderColor = 'var(--border)'}
+                />
+              </>
+            )}
+            {asksCode && (
+              <>
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>
+                  {t('admin.security.ssoLinkConfirmTotp', { provider: linking.name })}
+                </p>
+                <MaterialInput
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  value={code}
+                  onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  autoFocus
+                  placeholder={t('admin.security.totpVerifyPh')}
+                  style={{ ...inputStyle, letterSpacing: '0.3em', fontVariantNumeric: 'tabular-nums' }}
+                  onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+                  onBlur={e => e.target.style.borderColor = 'var(--border)'}
+                />
+              </>
+            )}
+            {reauth === 'oidc' && !asksCode && (
+              <>
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>
+                  {oidcProviders.length > 0
+                    ? t('admin.security.ssoLinkConfirmOidc', { provider: linking.name })
+                    : t('admin.security.ssoLinkConfirmNoProvider')}
+                </p>
+                {oidcProviders.length > 0 && (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {oidcProviders.map(p => (
+                      <a key={p.slug} href={`/auth/oidc/${p.slug}/start?action=reauth`} className="md-button" data-variant="outlined">
+                        {t('admin.security.ssoLinkConfirmOidcButton', { provider: p.name })}
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+            {reauth === 'totpSetup' && (
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>
+                {t('admin.security.ssoLinkConfirmTotpSetup')}
+              </p>
+            )}
+            {linkError && (
+              <div role="alert" style={{
+                padding: '8px 10px', background: 'rgba(248,113,113,0.1)',
+                border: '1px solid rgba(248,113,113,0.3)', borderRadius: 7, color: 'var(--red)', fontSize: 12,
+              }}>
+                {linkError}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              {(reauth === 'password' || asksCode) && (
+                <MaterialButton
+                  type="submit"
+                  disabled={!canContinue}
+                  style={{
+                    padding: '8px 16px', background: 'var(--accent)', border: 'none',
+                    borderRadius: 7, color: 'var(--accent-text)', fontSize: 13, fontWeight: 500,
+                    cursor: canContinue ? 'pointer' : 'not-allowed', opacity: canContinue ? 1 : 0.6,
+                  }}
+                >
+                  {checking ? t('admin.security.ssoLinkChecking') : t('admin.security.ssoLinkContinue')}
+                </MaterialButton>
+              )}
+              <MaterialButton
+                type="button"
+                onClick={closeLinkForm}
+                style={{
+                  padding: '8px 16px', background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)', borderRadius: 7,
+                  color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer',
+                }}
+              >
+                {t('common.cancel')}
+              </MaterialButton>
+            </div>
+          </form>
+        ) : unlinkableProviders.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {unlinkableProviders.map(p => (
+              <MaterialButton key={p.id} type="button" onClick={() => startLink(p)} style={ssoProviderButtonStyle}>
+                <MaterialIcon name="link" />
+                {t('admin.security.ssoLink', { provider: p.name })}
+              </MaterialButton>
+            ))}
+          </div>
+        )}
+
+        {identities.length === 0 && unlinkableProviders.length === 0 && (
+          <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
+            {t('admin.security.ssoNoProviders')}
+          </div>
+        )}
+      </div>
+
+      <ConfirmOverlay dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
+    </>
+  );
+}
+
+function makeSearchIndex(t) {
+  const tabLabel = (id) => t(`admin.tabs.${id}`);
+  const layoutCrumb = `${tabLabel('appearance')} › ${t('admin.appearance.layout')}`;
+  const behaviorCrumb = tabLabel('behavior');
+  const fontsCrumb = `${tabLabel('appearance')} › ${tabLabel('fontsAndLanguage')}`;
+  const secCrumb = `${tabLabel('security')} › ${tabLabel('security')}`;
+  const privCrumb = `${tabLabel('security')} › ${tabLabel('privacy')}`;
+  return [
+    // Accounts
+    { label: t('admin.accounts.title'), keywords: ['account', 'email', 'imap', 'smtp', 'gmail', 'yahoo', 'icloud', 'password', 'add account', 'connect'], tab: 'accounts', breadcrumb: tabLabel('accounts') },
+    { label: t('admin.accounts.signatureSection'), keywords: ['signature', 'sign off', 'footer', 'alias', 'send as'], tab: 'accounts', breadcrumb: tabLabel('accounts') },
+    { label: t('admin.accounts.autoRecipientsSection'), keywords: ['cc', 'bcc', 'copy', 'carbon copy', 'blind copy', 'always bcc', 'automatic', 'copy to myself'], tab: 'accounts', breadcrumb: tabLabel('accounts') },
+    // Rules
+    { label: t('admin.rules.title'), keywords: ['rule', 'filter', 'condition', 'action', 'move', 'auto', 'automate', 'inbox rule', 'sort'], tab: 'rules', subtab: 'rules', breadcrumb: `${tabLabel('rules')} › ${t('admin.rules.subTabRules')}` },
+    { label: t('admin.rules.subTabBlockList'), keywords: ['block', 'blocked', 'sender', 'blacklist', 'spam', 'domain'], tab: 'rules', subtab: 'block-list', breadcrumb: `${tabLabel('rules')} › ${t('admin.rules.subTabBlockList')}` },
+    // Appearance > Theme
+    { label: tabLabel('theme'), keywords: ['theme', 'dark', 'light', 'color', 'colour', 'dark mode', 'light mode'], tab: 'appearance', subtab: 'theme', breadcrumb: `${tabLabel('appearance')} › ${tabLabel('theme')}` },
+    { label: t('admin.appearance.darkEmailBodies'), keywords: ['dark email', 'email body', 'dark mode', 'dark message', 'white background'], tab: 'appearance', subtab: 'theme', breadcrumb: `${tabLabel('appearance')} › ${tabLabel('theme')}` },
+    // Appearance > Layout
+    { label: t('admin.appearance.layout'), keywords: ['layout', 'pane', 'split', 'preview', 'reading pane', 'side by side', 'stacked'], tab: 'appearance', subtab: 'layout', breadcrumb: layoutCrumb },
+    { label: t('admin.messageList.scrollingMode'), keywords: ['scroll', 'infinite', 'paginated', 'pagination', 'pages'], tab: 'appearance', subtab: 'layout', breadcrumb: layoutCrumb },
+    { label: t('admin.messageList.perPagePaginated'), keywords: ['per page', 'batch', 'messages per page', 'count', '25', '50', '100', '200', 'page size'], tab: 'appearance', subtab: 'layout', breadcrumb: layoutCrumb },
+    { label: t('admin.messageList.hoverQuickActionsMode'), keywords: ['hover', 'quick actions', 'hover buttons', 'row actions'], tab: 'appearance', subtab: 'layout', mobileHidden: true, breadcrumb: layoutCrumb },
+    {
+      label: t('admin.messageList.senderFavicons'),
+      keywords: ['sender', 'favicon', 'avatar', 'contact photo', 'website icon', 'logo'],
+      tab: 'appearance', subtab: 'layout', breadcrumb: layoutCrumb,
+    },
+    { label: t('admin.messageList.threadingMode'), keywords: ['thread', 'conversation', 'grouping', 'threading', 'group'], tab: 'appearance', subtab: 'layout', breadcrumb: layoutCrumb },
+    // Behavior
+    { label: t('admin.messageList.swipeActions'), keywords: ['swipe', 'gesture', 'mobile', 'swipe left', 'swipe right', 'touch'], tab: 'behavior', breadcrumb: behaviorCrumb },
+    { label: t('admin.messageList.syncFrequency'), keywords: ['sync', 'interval', 'frequency', 'refresh', 'poll', 'check mail', '15s', '30s', '60s'], tab: 'behavior', breadcrumb: behaviorCrumb },
+    { label: t('admin.messageList.folderSyncFrequency'), keywords: ['folder', 'sync', 'structure', 'list', 'refresh', 'mailbox', '15 min', '30 min', '1 hour', 'never'], tab: 'behavior', breadcrumb: behaviorCrumb },
+    { label: t('admin.messageList.composeFormat'), keywords: ['compose', 'format', 'rich text', 'plain text', 'html', 'editor'], tab: 'behavior', breadcrumb: behaviorCrumb },
+    { label: t('admin.messageList.defaultReplyAction'), keywords: ['reply', 'reply all', 'default reply'], tab: 'behavior', breadcrumb: behaviorCrumb },
+    { label: t('admin.messageList.afterRemove'), keywords: ['next message', 'auto advance', 'after delete', 'after archive', 'open next', 'previous message'], tab: 'behavior', breadcrumb: behaviorCrumb },
+    { label: t('admin.messageList.markReadBehavior'), keywords: ['mark read', 'mark as read', 'read delay', 'auto read', 'manual read', 'unread'], tab: 'behavior', breadcrumb: behaviorCrumb },
+    { label: t('admin.messageList.defaultSender'), keywords: ['from', 'sender', 'default sender', 'send from', 'alias', 'identity'], tab: 'behavior', breadcrumb: behaviorCrumb },
+    { label: t('admin.messageList.defaultMailApp'), keywords: ['mailto', 'default app', 'default email', 'protocol handler', 'links'], tab: 'behavior', breadcrumb: behaviorCrumb },
+    // Appearance > Fonts & Language
+    { label: t('admin.appearance.language'), keywords: ['language', 'locale', 'french', 'english', 'spanish', 'german', 'deutsch', 'russian', 'chinese', 'italian', 'czech', 'čeština', 'portuguese', 'português', 'brasil', 'korean', '한국어', 'français', 'español'], tab: 'appearance', subtab: 'fonts', breadcrumb: fontsCrumb },
+    { label: t('admin.appearance.fontSize'), keywords: ['font size', 'text size', 'zoom', 'scale', 'accessibility', 'larger text'], tab: 'appearance', subtab: 'fonts', breadcrumb: fontsCrumb },
+    { label: t('admin.appearance.typography'), keywords: ['font', 'typography', 'typeface', 'serif', 'sans', 'monospace', 'reading font'], tab: 'appearance', subtab: 'fonts', breadcrumb: fontsCrumb },
+    // Email providers (admin)
+    { label: t('mailSignIn.ms.title'), keywords: ['microsoft', 'outlook', 'hotmail', '365', 'oauth', 'azure', 'entra', 'client id', 'tenant', 'ms365', 'office', 'shared app', 'sign in', 'email providers', 'mailbox', 'mail sign-in'], tab: 'mail-signin', adminOnly: true, breadcrumb: t('admin.tabs.mailSignIn') },
+    { label: t('admin.integrations.google.title'), keywords: ['google', 'gmail', 'workspace', 'oauth', 'client id', 'sign in', 'email providers', 'mailbox'], tab: 'mail-signin', adminOnly: true, breadcrumb: t('admin.tabs.mailSignIn') },
+    // Integrations
+    { label: t('admin.integrations.todoist.title'), keywords: ['todoist', 'tasks', 'to-do', 'carddav', 'contacts sync'], tab: 'integrations', breadcrumb: tabLabel('integrations') },
+    { label: t('admin.ai.title'), keywords: ['ai', 'artificial intelligence', 'chatgpt', 'ollama', 'llm', 'language model', 'summarize', 'draft', 'compose assistant', 'openai', 'local ai', 'inference', 'gpt'], tab: 'ai', adminOnly: true, breadcrumb: tabLabel('ai') },
+    { label: t('admin.plugins.title'), keywords: ['plugin', 'plugins', 'extension', 'extensions', 'add-on', 'addon', 'gtd', 'activate', 'enable feature', 'modules'], tab: 'plugins', breadcrumb: tabLabel('plugins') },
+    { label: t('admin.categories.title'), keywords: ['categories', 'categorize', 'newsletter', 'promotion', 'social', 'automated', 'inbox tabs', 'sort emails', 'classify'], tab: 'categories', breadcrumb: tabLabel('categories') },
+    { label: t('admin.categories.gtdReveal'), keywords: ['gtd', 'todo', 'getting things done', 'watch', 'delegated', 'someday', 'reference', 'next action', 'waiting', 'inbox zero', 'pet'], tab: 'categories', subtab: 'gtd', breadcrumb: `${tabLabel('categories')} › ${t('admin.categories.gtdReveal')}` },
+    // Security
+    { label: t('admin.security.totpTitle'), keywords: ['2fa', 'totp', 'authenticator', 'two factor', 'otp', 'two-factor', 'mfa', 'security code'], tab: 'security', subtab: 'security', breadcrumb: secCrumb },
+    { label: t('admin.apiTokens.title'), keywords: ['api', 'token', 'api token', 'access token', 'personal access token', 'bearer', 'mcp', 'script', 'revoke'], tab: 'security', subtab: 'security', breadcrumb: secCrumb },
+    { label: t('admin.security.ssoTitle'), keywords: ['sso', 'linked', 'identity', 'provider', 'link', 'unlink', 'oidc', 'connect identity'], tab: 'security', subtab: 'security', breadcrumb: secCrumb },
+    { label: t('admin.security.loginProtectionTitle'), keywords: ['login', 'attempts', 'brute force', 'lockout', 'max attempts', 'rate limit'], tab: 'security', subtab: 'security', adminOnly: true, breadcrumb: secCrumb },
+    { label: t('admin.security.mailPolicyTitle'), keywords: ['server', 'tls', 'insecure', 'private ip', 'port', 'mail server', 'ssl'], tab: 'security', subtab: 'security', adminOnly: true, breadcrumb: secCrumb },
+    { label: t('admin.security.activityTitle'), keywords: ['log', 'activity', 'auth events', 'history', 'login history', 'audit'], tab: 'security', subtab: 'security', adminOnly: true, breadcrumb: secCrumb },
+    { label: t('admin.privacy.blockImages'), keywords: ['images', 'remote', 'block', 'privacy', 'tracking pixel', 'spy pixel', 'block images'], tab: 'security', subtab: 'privacy', breadcrumb: privCrumb },
+    { label: t('admin.privacy.allowedSenders'), keywords: ['whitelist', 'allow', 'sender', 'trusted', 'safe', 'allowed domain', 'image whitelist'], tab: 'security', subtab: 'privacy', breadcrumb: privCrumb },
+    // Notifications
+    { label: t('admin.search.notificationSound'), keywords: ['sound', 'notification sound', 'audio', 'alert', 'beep', 'chime'], tab: 'notifications', breadcrumb: tabLabel('notifications') },
+    { label: t('admin.notifications.appBadge'), keywords: ['badge', 'app icon', 'pwa', 'unread count', 'icon badge'], tab: 'notifications', breadcrumb: tabLabel('notifications') },
+    { label: t('admin.notifications.faviconBadge'), keywords: ['favicon', 'tab badge', 'browser tab', 'tab icon', 'unread dot'], tab: 'notifications', breadcrumb: tabLabel('notifications') },
+    { label: t('admin.push.title'), keywords: ['push', 'notification', 'browser notification', 'desktop notification', 'permission'], tab: 'notifications', breadcrumb: tabLabel('notifications') },
+    { label: t('admin.pushPriorities.title'), keywords: ['push', 'priority', 'category', 'delivery', '푸시', '우선순위'], tab: 'notifications', breadcrumb: tabLabel('notifications') },
+    // Shortcuts (desktop only)
+    { label: tabLabel('shortcuts'), keywords: ['shortcut', 'keyboard', 'hotkey', 'keybind', 'key binding', 'compose shortcut', 'reply shortcut'], tab: 'shortcuts', mobileHidden: true, breadcrumb: tabLabel('shortcuts') },
+    // Admin-only
+    { label: t('admin.systemEmail.tabUsers'), keywords: ['user', 'invite', 'admin', 'role', 'manage users', 'add user'], tab: 'users', adminOnly: true, breadcrumb: tabLabel('users') },
+    { label: t('admin.systemEmail.tabEmail'), keywords: ['system email', 'smtp', 'admin email', 'invite email', 'outgoing email'], tab: 'users', adminOnly: true, breadcrumb: tabLabel('users') },
+    { label: t('admin.sso.title'), keywords: ['sso', 'oidc', 'single sign on', 'single sign-on', 'oauth', 'provider', 'identity provider', 'log in to mailflow'], tab: 'sso', adminOnly: true, breadcrumb: tabLabel('sso') },
+    { label: t('admin.backup.title'), keywords: ['backup', 'restore', 'export', 'import', 'migrate', 'move server', 'transfer', 'download settings'], tab: 'backup', adminOnly: true, breadcrumb: tabLabel('backup') },
+  ];
+}
+
+function SearchResultsView({ results, query, onNavigate, t }) {
+  if (results.length === 0) {
+    return (
+      <div style={{ color: 'var(--text-tertiary)', fontSize: 'var(--md-sys-typescale-body-medium-size)', padding: '48px 0', textAlign: 'center' }}>
+        {t('admin.search.noResults', { query })}
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {results.map((item, i) => (
+        <MaterialButton variant="outlined"
+          key={i}
+          onClick={() => onNavigate(item.tab, item.subtab)}
+          style={{
+            display: 'flex', flexDirection: 'column', gap: 3,
+            padding: '10px 14px', borderRadius: 'var(--md-sys-shape-corner-small)', border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-primary)', cursor: 'pointer', textAlign: 'left',
+            transition: 'border-color 0.12s, background 0.12s', width: '100%',
+          }}
+          
+          
+        >
+          <span style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)' }}>{item.label}</span>
+          <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)' }}>{item.breadcrumb}</span>
+        </MaterialButton>
+      ))}
+    </div>
+  );
+}
+
+export default function AdminPanel() {
+  const { t } = useTranslation();
+  const { setShowAdmin, adminTab, setAdminTab, user, fontSize } = useStore();
+  const materialDialogRef = useModalFocus({ onEscape: () => setShowAdmin(false) });
+  const isMobile = useMobile();
+  const visibleTabs = TABS.filter(tab => (!tab.adminOnly || user?.isAdmin) && (!tab.mobileHidden || !isMobile));
+
+  const tabScrollRef = useRef(null);
+  const [tabRightOverflow, setTabRightOverflow] = useState(false);
+  const isAdmin = !!user?.isAdmin;
+  useLayoutEffect(() => {
+    const el = tabScrollRef.current;
+    if (!el) return;
+    const check = () => setTabRightOverflow(el.scrollWidth > el.clientWidth && el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+    check();
+    el.addEventListener('scroll', check, { passive: true });
+    return () => el.removeEventListener('scroll', check);
+  }, [isMobile, isAdmin]);
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [pendingSubTab, setPendingSubTab] = useState(null);
+
+  const searchIndex = useMemo(() => makeSearchIndex(t), [t]);
+
+  const navigateTo = (tab, subtab) => {
+    setSearchQuery('');
+    setAdminTab(tab);
+    setPendingSubTab(subtab || null);
+  };
+  const handleTabClick = (tabId) => {
+    setPendingSubTab(null);
+    setAdminTab(tabId);
+  };
+  const searchResults = searchQuery.trim()
+    ? searchIndex.filter(item => {
+        if (item.adminOnly && !user?.isAdmin) return false;
+        if (item.mobileHidden && isMobile) return false;
+        const q = searchQuery.toLowerCase();
+        return item.label.toLowerCase().includes(q) || item.keywords.some(k => k.includes(q));
+      })
+    : null;
+
+  useLayoutEffect(() => {
+    const nav = tabScrollRef.current;
+    const active = nav?.querySelector('.admin-tab-active');
+    if (!active) return;
+    const a = active.getBoundingClientRect();
+    const n = nav.getBoundingClientRect();
+    const scale = fontSize / 100;
+    if (isMobile) {
+      const left = n.left + 12 * scale;
+      const right = n.right - 48 * scale;
+      nav.scrollLeft += (a.left < left ? a.left - left : a.right > right ? a.right - right : 0) / scale;
+    } else nav.scrollTop += (a.top < n.top ? a.top - n.top : a.bottom > n.bottom ? a.bottom - n.bottom : 0) / scale;
+  }, [adminTab, isMobile, fontSize, searchQuery]);
+
+  const searchInput = (compact) => (
+    <div className="material-search" style={{ position: 'relative' }}>
+      <div style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}><MaterialIcon name="search" /></div>
+      <MaterialInput
+        value={searchQuery}
+        onChange={e => setSearchQuery(e.target.value)}
+        onKeyDown={e => e.key === 'Escape' && setSearchQuery('')}
+        placeholder={t('admin.search.placeholder')}
+        style={{
+          width: '100%', boxSizing: 'border-box',
+          background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+          borderRadius: 'var(--md-sys-shape-corner-small)', color: 'var(--text-primary)', outline: 'none',
+          fontSize: compact ? 12 : 13,
+          padding: compact ? '5px 24px 5px 27px' : '7px 28px 7px 30px',
+        }}
+      />
+      {searchQuery && (
+        <MaterialButton variant="icon"
+          onClick={() => setSearchQuery('')}
+          style={{
+            position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: 'var(--text-tertiary)', padding: 0, display: 'flex', alignItems: 'center',
+          }}
+        >
+          <MaterialIcon name="close" />
+        </MaterialButton>
+      )}
+    </div>
+  );
+
+  const tabContent = (
+    <>
+      {adminTab === 'accounts' && <AccountsTab />}
+      {adminTab === 'antispam' && <SpamSettings />}
+      {adminTab === 'rules' && <RulesAndBlockListTab initialSubTab={pendingSubTab} />}
+      {adminTab === 'categories' && <CategoriesSection initialSubTab={pendingSubTab} />}
+      {adminTab === 'cleanup' && <MailboxCleanupTab />}
+      {adminTab === 'appearance' && <AppearanceTab initialSubTab={pendingSubTab} />}
+      {adminTab === 'integrations' && <IntegrationsTab />}
+      {adminTab === 'mail-signin' && user?.isAdmin && <MailSignInTab />}
+      {adminTab === 'users' && <UsersTab />}
+      {adminTab === 'sso' && <SSOTab />}
+      {adminTab === 'backup' && <BackupSettings />}
+      {adminTab === 'security' && <SecurityPrivacyTab key={user?.id ?? 'anonymous'} initialSubTab={pendingSubTab} />}
+      {adminTab === 'behavior' && <BehaviorTab />}
+      {adminTab === 'notifications' && <NotificationsTab />}
+      {adminTab === 'shortcuts' && !isMobile && <ShortcutsTab />}
+      {adminTab === 'ai' && <AISection />}
+      {adminTab === 'ai-actions' && <AiActionsTab />}
+      {adminTab === 'plugins' && <PluginsSection onNavigate={navigateTo} />}
+      {adminTab === 'about' && <AboutTab />}
+    </>
+  );
+
+  if (isMobile) {
+    return (
+      <div ref={materialDialogRef} role="dialog" aria-modal="true" aria-label={t('admin.title')} className="admin-panel" style={{
+        position: 'fixed', inset: 0, zIndex: 2000,
+        background: 'var(--bg-secondary)',
+        display: 'flex', flexDirection: 'column',
+        animation: 'sheet-enter var(--motion-normal) var(--ease-emphasized) both',
+      }}>
+        {/* Mobile header */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          paddingTop: 'calc(var(--sat) + 14px)',
+          paddingBottom: 14, paddingLeft: 16, paddingRight: 16,
+          borderBottom: '1px solid var(--border-subtle)',
+          flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 700, color: 'var(--text-primary)' }}>{t('admin.title')}</span>
+          <MaterialButton variant="icon"
+            onClick={() => setShowAdmin(false)}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--text-tertiary)', padding: 6, display: 'flex',
+            }}
+          >
+            <MaterialIcon name="close" />
+          </MaterialButton>
+        </div>
+
+        {/* Search */}
+        <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-subtle)', flexShrink: 0 }}>
+          {searchInput(true)}
+        </div>
+
+        {/* Horizontal scrollable tab bar */}
+        <div style={{ position: 'relative', flexShrink: 0, borderBottom: '1px solid var(--border-subtle)' }}>
+          <div role="navigation" aria-label={t('admin.title')} ref={tabScrollRef} className="admin-tabs" style={{
+            display: 'flex', gap: 6, padding: '10px 12px',
+            overflowX: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            scrollbarWidth: 'none',
+          }}>
+            <style>{`.admin-tabs::-webkit-scrollbar { display: none; }`}</style>
+            {visibleTabs.map(tab => (
+              <MaterialButton variant="chip" aria-current={adminTab === tab.id && !searchResults ? 'page' : undefined} selected={adminTab === tab.id && !searchResults}
+                key={tab.id}
+                className={adminTab === tab.id && !searchResults ? 'admin-tab admin-tab-active' : 'admin-tab'}
+                onClick={() => handleTabClick(tab.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '7px 12px', borderRadius: 'var(--md-sys-shape-corner-extra-large)', border: 'none',
+                  background: adminTab === tab.id && !searchResults ? 'var(--accent)' : 'var(--bg-tertiary)',
+                  color: adminTab === tab.id && !searchResults ? '#fff' : 'var(--text-secondary)',
+                  cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
+                  whiteSpace: 'nowrap', flexShrink: 0,
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+              >
+                <span style={{ display: 'flex', opacity: adminTab === tab.id && !searchResults ? 1 : 0.7 }}>{tab.icon}</span>
+                {t(tab.labelKey)}
+                {tab.beta && <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 700, letterSpacing: '0.06em', padding: '1px 4px', borderRadius: 'var(--md-sys-shape-corner-extra-small)', background: 'var(--md-sys-color-secondary-container)', color: 'var(--md-sys-color-on-secondary-container)' }}>BETA</span>}
+              </MaterialButton>
+            ))}
+          </div>
+          {/* Right-edge fade to signal more tabs off-screen */}
+          {tabRightOverflow && <div style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 48, pointerEvents: 'none', background: 'linear-gradient(to right, transparent, var(--bg-secondary))' }} />}
+        </div>
+
+        {/* Content — full width, scrollable */}
+        <div
+          style={{ flex: 1, overflow: 'auto', padding: '20px 16px' }}
+          onScroll={e => {
+            const el = e.currentTarget;
+            el.style.boxShadow = el.scrollTop > 4 ? 'inset 0 8px 8px -8px rgba(0,0,0,0.2)' : 'none';
+          }}
+        >
+          {searchResults !== null
+            ? <SearchResultsView results={searchResults} query={searchQuery} onNavigate={navigateTo} t={t} />
+            : tabContent}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={e => e.target === e.currentTarget && setShowAdmin(false)}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+         WebkitBackdropFilter: 'blur(8px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 2000, padding: 24,
+        animation: 'backdrop-enter var(--motion-fast) var(--ease-standard) both',
+      }}
+    >
+      <div ref={materialDialogRef} role="dialog" aria-modal="true" aria-label={t('admin.title')} className="admin-panel admin-window" style={{
+        background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+        borderRadius: 'var(--md-sys-shape-corner-large)', width: '100%', maxWidth: 740,
+        // vh is the real screen, but the app is drawn scaled by the font size (MailApp), so at
+        // 125% a plain 82vh came out taller than the screen and the top went off it.
+        height: `calc(82vh / ${(fontSize || 100) / 100})`, maxHeight: 700, display: 'flex', overflow: 'hidden',
+        boxShadow: 'var(--shadow-modal)',
+        animation: 'modal-enter var(--motion-normal) var(--ease-emphasized) backwards',
+      }}>
+        {/* Left sidebar */}
+        <div style={{
+          width: 216, borderRight: '1px solid var(--border-subtle)',
+          background: 'var(--bg-primary)', padding: '20px 10px',
+          display: 'flex', flexDirection: 'column', flexShrink: 0,
+        }}>
+          <div style={{ padding: '0 2px', marginBottom: 10 }}>
+            {searchInput(true)}
+          </div>
+
+          {/* Scrollable tab list — keeps the Close button pinned even when the tab list is taller
+              than the modal (e.g. once several plugins/beta tabs are present). */}
+          {/* overflowX hidden: overflowY:auto would otherwise promote overflow-x to auto too, so a
+              long label in any locale (e.g. German "Tastaturkürzel") would show a horizontal
+              scrollbar. Labels wrap instead of overflowing (see the tab buttons below). */}
+          <div ref={tabScrollRef} className="admin-nav-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
+          {TAB_GROUPS.map((group, gi) => {
+            const groupTabs = visibleTabs.filter(tab => group.tabIds.includes(tab.id));
+            if (groupTabs.length === 0) return null;
+            return (
+              <div key={group.id} style={{ marginBottom: gi < TAB_GROUPS.length - 1 ? 4 : 0 }}>
+                <div style={{
+                  fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 700, color: 'var(--text-secondary)',
+                  letterSpacing: '0.07em', textTransform: 'uppercase', overflowWrap: 'anywhere',
+                  padding: gi === 0 ? '2px 10px 3px' : '10px 10px 3px',
+                  borderTop: gi === 0 ? 'none' : '1px solid var(--border-subtle)',
+                  marginTop: gi === 0 ? 0 : 4,
+                }}>
+                  {t(group.labelKey)}
+                </div>
+                {groupTabs.map(tab => {
+                  const isActive = adminTab === tab.id && !searchResults;
+                  return (
+                    <MaterialButton variant="navigation" selected={isActive} aria-current={isActive ? 'page' : undefined}
+                      key={tab.id}
+                      className={isActive ? 'admin-tab admin-tab-active' : 'admin-tab'}
+                      onClick={() => handleTabClick(tab.id)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 9,
+                        padding: '7px 10px', borderRadius: 'var(--md-sys-shape-corner-small)', border: 'none',
+                        background: isActive ? 'var(--bg-hover)' : 'transparent',
+                        color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                        cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: isActive ? 500 : 400,
+                        width: '100%', textAlign: 'left', transition: 'all 0.1s',
+                      }}
+                      
+                      
+                    >
+                      <span style={{ color: isActive ? 'var(--accent)' : 'var(--text-tertiary)', flexShrink: 0 }}>
+                        {tab.icon}
+                      </span>
+                      <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{t(tab.labelKey)}</span>
+                      {tab.beta && <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 700, letterSpacing: '0.06em', padding: '1px 4px', borderRadius: 'var(--md-sys-shape-corner-extra-small)', background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--accent)', flexShrink: 0 }}>BETA</span>}
+                    </MaterialButton>
+                  );
+                })}
+              </div>
+            );
+          })}
+
+          {/* About — ungrouped, sits above the close button */}
+          {visibleTabs.filter(tab => !TAB_GROUPS.some(g => g.tabIds.includes(tab.id))).map(tab => {
+            const isActive = adminTab === tab.id && !searchResults;
+            return (
+              <MaterialButton selected={isActive} aria-pressed={Boolean(isActive)} aria-current={isActive ? 'page' : undefined} variant="text"
+                className={isActive ? 'admin-tab admin-tab-active' : 'admin-tab'}
+                key={tab.id}
+                onClick={() => handleTabClick(tab.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 9,
+                  padding: '7px 10px', borderRadius: 'var(--md-sys-shape-corner-small)', border: 'none',
+                  background: isActive ? 'var(--bg-hover)' : 'transparent',
+                  color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: isActive ? 500 : 400,
+                  width: '100%', textAlign: 'left', transition: 'all 0.1s',
+                }}
+                
+                
+              >
+                <span style={{ color: isActive ? 'var(--accent)' : 'var(--text-tertiary)', flexShrink: 0 }}>
+                  {tab.icon}
+                </span>
+                <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{t(tab.labelKey)}</span>
+                {tab.beta && <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 700, letterSpacing: '0.06em', padding: '1px 4px', borderRadius: 'var(--md-sys-shape-corner-extra-small)', background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--accent)', flexShrink: 0 }}>BETA</span>}
+              </MaterialButton>
+            );
+          })}
+          </div>
+
+          <div style={{ height: 1, background: 'var(--border-subtle)', margin: '6px 0' }} />
+          <MaterialButton variant="text"
+            onClick={() => setShowAdmin(false)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 9,
+              padding: '8px 10px', borderRadius: 'var(--md-sys-shape-corner-small)', border: 'none',
+              background: 'transparent', color: 'var(--text-tertiary)',
+              cursor: 'pointer', fontSize: 'var(--md-sys-typescale-body-medium-size)', width: '100%', textAlign: 'left',
+            }}
+            
+            
+          >
+            <MaterialIcon name="close" />
+            {t('admin.close')}
+          </MaterialButton>
+        </div>
+
+        {/* Content */}
+        <div
+          style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: '24px' }}
+          onScroll={e => {
+            const el = e.currentTarget;
+            el.style.boxShadow = el.scrollTop > 4 ? 'inset 0 8px 8px -8px rgba(0,0,0,0.2)' : 'none';
+          }}
+        >
+          {searchResults !== null ? <SearchResultsView results={searchResults} query={searchQuery} onNavigate={navigateTo} t={t} /> : tabContent}
+        </div>
+      </div>
+    </div>
+  );
+}
