@@ -2,7 +2,7 @@
 
 MailFlow M3 is an independently maintained Material 3 web frontend derived from [MailFlow by Matthias and contributors](https://github.com/maathimself/mailflow). It was adapted from the upstream React frontend and updated for [MailFlow v4.4.0](https://github.com/maathimself/mailflow/releases/tag/v4.4.0) (`1db523a`). Changes through 2026-11-18 include the Material UI, Korean localization, appearance sync, and PWA notification changes.
 
-Use the [MailFlow backend fork](https://github.com/sekkamoyou/mailflow/tree/mailflow-m3) for appearance synchronization, instance branding, message metadata and previews, and the push notification extensions.
+Use the [MailFlow M3 backend](../backend/) in this repository for appearance synchronization, instance branding, message metadata and previews, and the push notification extensions.
 
 ## Build and run
 

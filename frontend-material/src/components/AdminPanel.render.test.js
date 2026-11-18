@@ -81,8 +81,8 @@ test('About is available to regular users and separates versions from short buil
     assert.equal(rowValue('admin.about.frontendBuild'), '1234567');
     assert.equal(rowValue('admin.about.version'), '4.4.0');
     assert.equal(rowValue('admin.about.backendBuild'), 'abcdef1');
-    assert.ok(document.querySelector('a[href="https://github.com/sekkamoyou/mailflow-m3"]'));
-    assert.ok(document.querySelector('a[href="https://github.com/sekkamoyou/mailflow/tree/mailflow-m3"]'));
+    assert.ok(document.querySelector('a[href="https://github.com/sekkamoyou/mailflow-m3/tree/mailflow-m3/frontend-material"]'));
+    assert.ok(document.querySelector('a[href="https://github.com/sekkamoyou/mailflow-m3/tree/mailflow-m3/backend"]'));
     assert.ok(document.querySelector('a[href="/licenses/AGPL-3.0.txt"]'));
     await React.act(async () => useStore.setState({ adminTab: 'accounts' }));
     backendSha = 'dev';
