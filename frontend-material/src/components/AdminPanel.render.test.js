@@ -95,10 +95,14 @@ test('About is available to regular users and separates versions from short buil
     assert.equal(licenseLink?.textContent, 'AGPL-3.0');
     await React.act(async () => useStore.setState({ adminTab: 'accounts' }));
     backendVersion = '4.5.2';
-    backendSha = 'dev';
+    backendSha = '0123456789abcdef0123456789abcdef01234567';
     await React.act(async () => useStore.setState({ adminTab: 'about' }));
     assert.equal(rowValue('admin.about.version'), 'v4.5.2-m3');
-    assert.equal(rowValue('admin.about.backendBuild'), '56789ab');
+    assert.equal(rowValue('admin.about.backendBuild'), '0123456');
+    await React.act(async () => useStore.setState({ adminTab: 'accounts' }));
+    backendSha = 'dev';
+    await React.act(async () => useStore.setState({ adminTab: 'about' }));
+    assert.equal(rowValue('admin.about.backendBuild'), '—');
   } finally {
     await React.act(async () => root.unmount());
     delete globalThis.__VITE_ENV__.VITE_BUILD_SHA;
