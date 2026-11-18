@@ -51,7 +51,9 @@ Object.assign(globalThis, {
   IS_REACT_ACT_ENVIRONMENT: true,
 });
 dom.window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} });
-globalThis.__VITE_ENV__ = { MODE: 'test', DEV: false, PROD: true };
+const pinnedBackendSha = '56789abcdef0123456789abcdef0123456789abc';
+const pinnedBackendUrl = `https://github.com/sekkamoyou/mailflow-m3/tree/${pinnedBackendSha}/backend`;
+globalThis.__VITE_ENV__ = { MODE: 'test', DEV: false, PROD: true, VITE_BACKEND_SOURCE_URL: pinnedBackendUrl };
 globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => '' });
 
 const React = await import('react');
@@ -86,7 +88,7 @@ test('About is available to regular users and separates versions from short buil
     const sourceLinks = [...label('admin.about.sourceCode').parentElement.querySelectorAll('a')];
     assert.deepEqual(sourceLinks.map(link => link.getAttribute('href')), [
       'https://github.com/sekkamoyou/mailflow-m3/tree/mailflow-m3/frontend-material',
-      'https://github.com/sekkamoyou/mailflow-m3/tree/mailflow-m3/backend',
+      pinnedBackendUrl,
     ]);
     const licenseLink = label('admin.about.license').nextElementSibling.querySelector('a');
     assert.equal(licenseLink?.getAttribute('href'), '/licenses/AGPL-3.0.txt');
@@ -96,7 +98,7 @@ test('About is available to regular users and separates versions from short buil
     backendSha = 'dev';
     await React.act(async () => useStore.setState({ adminTab: 'about' }));
     assert.equal(rowValue('admin.about.version'), 'v4.5.2-m3');
-    assert.equal(rowValue('admin.about.backendBuild'), '—');
+    assert.equal(rowValue('admin.about.backendBuild'), '56789ab');
   } finally {
     await React.act(async () => root.unmount());
     delete globalThis.__VITE_ENV__.VITE_BUILD_SHA;

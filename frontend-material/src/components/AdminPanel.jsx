@@ -1,6 +1,7 @@
 import AppearanceSyncSettings from './AppearanceSyncSettings.jsx';
 import PushPrioritiesSection from './PushPrioritiesSection.jsx';
 import SourceNotice from './SourceNotice.jsx';
+import { backendSourceUrl } from '../utils/sourceLinks.js';
 import frontendPackage from '../../package.json';
 import { useModalFocus } from '../material/useModalFocus.js';
 import { MaterialIcon } from '../material/controls.jsx';
@@ -5508,6 +5509,7 @@ function SecurityPrivacyTab({ initialSubTab }) {
 }
 
 // ─── About Tab ───────────────────────────────────────────────────────────────
+const pinnedBackendSha = backendSourceUrl.match(/\/tree\/([a-f0-9]{40})(?:\/backend)?\/?$/i)?.[1];
 function shortBuild(sha) {
   return typeof sha === 'string' && /^[a-f0-9]{7,64}$/i.test(sha) ? sha.slice(0, 7) : '—';
 }
@@ -5533,7 +5535,7 @@ function AboutTab() {
     [t('admin.about.frontendVersion'), frontendPackage.version],
     [t('admin.about.frontendBuild'),  shortBuild(import.meta.env.VITE_BUILD_SHA)],
     [t('admin.about.version'),        info ? backendVersionLabel(info.version) : '…'],
-    [t('admin.about.backendBuild'),   info ? shortBuild(info.sha) : '…'],
+    [t('admin.about.backendBuild'),   info ? shortBuild(info.sha === 'dev' ? pinnedBackendSha : info.sha) : '…'],
     [t('admin.about.license'), (
       <a href="/licenses/AGPL-3.0.txt" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>AGPL-3.0</a>
     )],
