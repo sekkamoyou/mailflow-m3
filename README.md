@@ -4,6 +4,28 @@ MailFlow M3 is a self-hosted webmail client with a Material 3 interface and a co
 
 [Run MailFlow M3](#run-mailflow-m3) · [Versions and build information](#versions-and-build-information) · [License and third-party notices](#license-and-third-party-notices) · [Upstream MailFlow reference](#upstream-mailflow-reference)
 
+## Screenshots
+
+The screenshots use sample mailboxes. Select an image to open it at full size.
+
+<p align="center">
+  <a href="media/mailflow-m3-desktop.png"><img src="media/mailflow-m3-desktop.png" width="820" alt="MailFlow M3 desktop inbox with a sample message open in the reading pane"></a>
+</p>
+
+### Appearance sync and message composition
+
+<p align="center">
+  <a href="media/mailflow-m3-appearance.png"><img src="media/mailflow-m3-appearance.png" width="422" alt="Appearance sync settings with separate desktop and mobile profiles selected"></a>
+  <a href="media/mailflow-m3-compose.png"><img src="media/mailflow-m3-compose.png" width="393" alt="Message composition window with a sample recipient, formatted body controls, and Send button"></a>
+</p>
+
+### Mobile folder navigation and push priority
+
+<p align="center">
+  <a href="media/mailflow-m3-mobile.png"><img src="media/mailflow-m3-mobile.png" width="205" alt="Mobile navigation drawer with the Studio Inbox folders expanded in dark mode"></a>
+  <a href="media/mailflow-m3-push-priority.png"><img src="media/mailflow-m3-push-priority.png" width="450" alt="Push priority by category with Primary set to High and Newsletters set to Low"></a>
+</p>
+
 ## What MailFlow M3 adds
 
 - **Web interface** — Material 3 navigation, controls, and dialogs for desktop and mobile, with refined Korean UI text.
