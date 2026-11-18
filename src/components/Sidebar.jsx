@@ -5,7 +5,6 @@ import { MaterialIcon } from '../material/controls.jsx';
 import { MaterialButton, MaterialInput } from '../material/controls.jsx';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import AccountMark from './AccountMark.jsx';
-import SourceNotice from './SourceNotice.jsx';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/index.js';
 import { totalBadge, unreadBadge } from '../utils/unreadBadge.js';
@@ -1780,8 +1779,6 @@ export default function Sidebar({ onClose } = {}) {
             </MaterialButton>
           )}
 
-          <SourceNotice />
-
           {/* Sign out */}
           <MaterialButton variant="navigation" type="button"
             onClick={() => signOut()}
@@ -1952,7 +1949,6 @@ export default function Sidebar({ onClose } = {}) {
               onClick={() => { setUserMenuOpen(false); lockScreen(); }}
             />
           )}
-          <SourceNotice />
           <CtxMenuItem menu={false} icon={ICONS.logout} label={t('sidebar.signOut')} danger
             onClick={() => { setUserMenuOpen(false); signOut(); }} />
         </div>

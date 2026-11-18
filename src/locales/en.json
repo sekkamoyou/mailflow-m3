@@ -1947,7 +1947,8 @@
     },
     "about": {
       "subtitle": "Open-source, self-hosted email client",
-      "version": "Version",
+      "version": "Backend version",
+      "frontendVersion": "Frontend version",
       "backendBuild": "Backend build",
       "frontendBuild": "Frontend build",
       "license": "License",

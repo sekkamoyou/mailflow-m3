@@ -1,6 +1,7 @@
 import AppearanceSyncSettings from './AppearanceSyncSettings.jsx';
 import PushPrioritiesSection from './PushPrioritiesSection.jsx';
 import SourceNotice from './SourceNotice.jsx';
+import frontendPackage from '../../package.json';
 import { useModalFocus } from '../material/useModalFocus.js';
 import { MaterialIcon } from '../material/controls.jsx';
 import { MaterialButton, MaterialInput, MaterialSelect, MaterialTextarea } from '../material/controls.jsx';
@@ -5507,6 +5508,10 @@ function SecurityPrivacyTab({ initialSubTab }) {
 }
 
 // ─── About Tab ───────────────────────────────────────────────────────────────
+function shortBuild(sha) {
+  return typeof sha === 'string' && /^[a-f0-9]{7,64}$/i.test(sha) ? sha.slice(0, 7) : '—';
+}
+
 function AboutTab() {
   const { t } = useTranslation();
   const [info, setInfo] = useState(null);
@@ -5519,12 +5524,12 @@ function AboutTab() {
       .catch(() => setInfo({ version: '—', sha: '—' }));
   }, []);
 
-  const feSha = import.meta.env.VITE_BUILD_SHA || 'dev';
   const infoRows = [
-    [t('admin.about.version'),       info ? info.version : '…'],
-    [t('admin.about.backendBuild'),  info ? info.sha     : '…'],
-    [t('admin.about.frontendBuild'), feSha],
-    [t('admin.about.license'),       'AGPL-3.0'],
+    [t('admin.about.frontendVersion'), frontendPackage.version],
+    [t('admin.about.frontendBuild'),  shortBuild(import.meta.env.VITE_BUILD_SHA)],
+    [t('admin.about.version'),        info ? info.version : '…'],
+    [t('admin.about.backendBuild'),   info ? shortBuild(info.sha) : '…'],
+    [t('admin.about.license'),        'AGPL-3.0'],
   ];
   const generalRows = [
     [t('admin.about.website'),    'https://mailflow.sh'],

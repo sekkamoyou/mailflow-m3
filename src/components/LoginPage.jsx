@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/index.js';
 import { api } from '../utils/api.js';
 import LogoMark from './LogoMark.jsx';
-import SourceNotice from './SourceNotice.jsx';
 import PasswordInput from './PasswordInput.jsx';
 import { MaterialIcon } from '../material/controls.jsx';
 
@@ -981,8 +980,6 @@ export default function LoginPage() {
           </>
           )}
         </div>
-
-        <SourceNotice />
 
         {!totpRequired && showToggle && (
           <p style={{ textAlign: 'center', marginTop: 20, fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--text-tertiary)' }}>

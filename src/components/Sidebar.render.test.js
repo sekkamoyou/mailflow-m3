@@ -54,11 +54,7 @@ dom.window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEv
 dom.window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
 globalThis.matchMedia = dom.window.matchMedia;
 dom.window.Element.prototype.scrollIntoView = () => {};
-globalThis.__VITE_ENV__ = {
-  MODE: 'test', DEV: false, PROD: true,
-  VITE_FRONTEND_SOURCE_URL: 'https://example.com/frontend/tree/release',
-  VITE_BACKEND_SOURCE_URL: 'https://example.com/backend/tree/release',
-};
+globalThis.__VITE_ENV__ = { MODE: 'test', DEV: false, PROD: true };
 globalThis.fetch = async () => ({ ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => ({}), text: async () => '{}' });
 
 const React = await import('react');
@@ -106,7 +102,7 @@ function badgeOf(name) {
   return badge && badge.tagName === 'SPAN' ? badge.textContent : null;
 }
 
-test('the account menu offers both deployed sources to a regular user', async () => {
+test('the account menu keeps source links in the About screen', async () => {
   await mount({ state: { user: { id: 1, username: 'reader', isAdmin: false } } });
   const trigger = [...document.querySelectorAll('button[aria-haspopup="dialog"]')]
     .find(button => button.textContent.includes('reader'));
@@ -114,9 +110,9 @@ test('the account menu offers both deployed sources to a regular user', async ()
   await React.act(async () => trigger.click());
   const menu = document.querySelector('[role="dialog"][aria-label="sidebar.settings"]');
   assert.ok(menu);
-  assert.equal(menu.querySelector('a[href="https://example.com/frontend/tree/release"]')?.textContent, 'MailFlow M3');
-  assert.equal(menu.querySelector('a[href="https://example.com/backend/tree/release"]')?.textContent, 'MailFlow backend');
-  assert.equal(menu.querySelector('a[href="/licenses/AGPL-3.0.txt"]')?.textContent, 'AGPL-3.0');
+  assert.ok(menu.textContent.includes('sidebar.settings'));
+  assert.ok(!menu.textContent.includes('admin.about.sourceCode'));
+  assert.equal(menu.querySelector('a[href="/licenses/AGPL-3.0.txt"]'), null);
   await React.act(async () => useStore.setState({ user: null }));
 });
 

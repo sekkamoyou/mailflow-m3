@@ -161,8 +161,6 @@ const SAME_VALUE_ALLOWED = {
   'login.totp.placeholder':                 'any', // 000000
 
   // ── Specific language groups ───────────────────────────────────────────────
-  // "Version" — same spelling in de, en, fr
-  'admin.about.version': [['de', 'en', 'fr']],
   // "via" (on-behalf-of sender, #366) — identical preposition in en and fr
   'message.via': [['en', 'fr', 'ptBR']],
   // "por {{actor}}" (who made an admin change) — the same preposition in es and pt-BR
@@ -723,6 +721,7 @@ const I18N_ATTRS = ['title', 'placeholder', 'aria-label', 'alt'];
 // Plain strings that are intentionally NOT translated (technical terms,
 // brand names, format placeholders). Add with a comment explaining why.
 const HARDCODED_OK = new Set([
+  'MailFlow M3', 'MailFlow backend', 'AGPL-3.0', // source link names and license identifier
   'YYYY-MM-DD', // The date editor accepts this fixed ISO syntax in every locale.
   // CSS/DOM placeholder for a variable-name input field — not a sentence
   'value',

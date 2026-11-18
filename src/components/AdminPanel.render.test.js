@@ -60,6 +60,41 @@ const { useStore } = await import('../store/index.js');
 const { api } = await import('../utils/api.js');
 const AdminPanel = (await import('./AdminPanel.jsx')).default;
 
+test('About is available to regular users and separates versions from short build hashes', async () => {
+  const originalFetch = globalThis.fetch;
+  const frontendSha = '123456789abcdef0123456789abcdef012345678';
+  let backendSha = 'abcdef1234567890abcdef1234567890abcdef12';
+  globalThis.__VITE_ENV__.VITE_BUILD_SHA = frontendSha;
+  globalThis.fetch = async (url, options) => url === '/api/version'
+    ? { ok: true, json: async () => ({ version: '4.4.0', sha: backendSha }) }
+    : originalFetch(url, options);
+  useStore.setState({ user: { id: 'u1', isAdmin: false }, accounts: [], adminTab: 'accounts' });
+  const root = createRoot(document.getElementById('root'));
+  const rowValue = key => [...document.querySelectorAll('span')].find(span => span.textContent === key)?.nextElementSibling?.textContent;
+  try {
+    await React.act(async () => root.render(React.createElement(AdminPanel)));
+    const about = [...document.querySelectorAll('button')].find(button => button.textContent.includes('admin.tabs.about'));
+    assert.ok(about);
+    await React.act(async () => about.click());
+    const frontendVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
+    assert.equal(rowValue('admin.about.frontendVersion'), frontendVersion);
+    assert.equal(rowValue('admin.about.frontendBuild'), '1234567');
+    assert.equal(rowValue('admin.about.version'), '4.4.0');
+    assert.equal(rowValue('admin.about.backendBuild'), 'abcdef1');
+    assert.ok(document.querySelector('a[href="https://github.com/sekkamoyou/mailflow-m3"]'));
+    assert.ok(document.querySelector('a[href="https://github.com/sekkamoyou/mailflow/tree/mailflow-m3"]'));
+    assert.ok(document.querySelector('a[href="/licenses/AGPL-3.0.txt"]'));
+    await React.act(async () => useStore.setState({ adminTab: 'accounts' }));
+    backendSha = 'dev';
+    await React.act(async () => useStore.setState({ adminTab: 'about' }));
+    assert.equal(rowValue('admin.about.backendBuild'), '—');
+  } finally {
+    await React.act(async () => root.unmount());
+    delete globalThis.__VITE_ENV__.VITE_BUILD_SHA;
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('color palettes are named native radio options independent of light/dark mode', async () => {
   const original = useStore.getState().setColorPalette;
   const chosen = [];

@@ -18,7 +18,7 @@ npm run build
 
 The dev server listens on `http://127.0.0.1:5174`. Set the backend's `APP_URL` and `FRONTEND_URL` for your deployment as described in the backend setup guide. For a deployment, serve `dist/` and route `/api`, `/ws`, `/oauth`, `/auth/oidc`, `/carddav`, and `/.well-known/carddav` to the backend. The included Dockerfile and Nginx configuration serve the frontend and proxy those routes.
 
-Set `VITE_FRONTEND_SOURCE_URL` and `VITE_BACKEND_SOURCE_URL` at build time to URLs for the exact deployed commits or release tags. The sign-in screen and account menu show both links. Docker and Compose accept the same values as build arguments.
+Set `VITE_FRONTEND_SOURCE_URL` and `VITE_BACKEND_SOURCE_URL` at build time to URLs for the exact deployed commits or release tags. Settings → About shows both links. Docker and Compose accept the same values as build arguments.
 
 ## License
 

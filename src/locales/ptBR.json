@@ -1947,7 +1947,8 @@
     },
     "about": {
       "subtitle": "Cliente de e-mail auto-hospedado e de código aberto",
-      "version": "Versão",
+      "version": "Versão do backend",
+      "frontendVersion": "Versão do frontend",
       "backendBuild": "Build do backend",
       "frontendBuild": "Build do frontend",
       "license": "Licença",

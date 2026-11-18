@@ -1872,7 +1872,8 @@
     },
     "about": {
       "subtitle": "Quelloffener, selbst gehosteter E-Mail-Client",
-      "version": "Version",
+      "version": "Backend-Version",
+      "frontendVersion": "Frontend-Version",
       "backendBuild": "Backend-Build",
       "frontendBuild": "Frontend-Build",
       "license": "Lizenz",

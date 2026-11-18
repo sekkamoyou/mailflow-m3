@@ -1947,9 +1947,10 @@
     },
     "about": {
       "subtitle": "Client e-mail open source self-hosted",
-      "version": "Versione",
-      "backendBuild": "Versione del backend",
-      "frontendBuild": "Versione del frontend",
+      "version": "Versione del backend",
+      "frontendVersion": "Versione del frontend",
+      "backendBuild": "Build backend",
+      "frontendBuild": "Build frontend",
       "license": "Licenza",
       "website": "Sito web",
       "sourceCode": "Codice sorgente",

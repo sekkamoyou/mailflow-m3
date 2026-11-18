@@ -1324,7 +1324,8 @@
     },
     "about": {
       "subtitle": "Open-source e-mailový klient pro vlastní hosting",
-      "version": "Verze",
+      "version": "Verze backendu",
+      "frontendVersion": "Verze frontendu",
       "backendBuild": "Sestavení backendu",
       "frontendBuild": "Sestavení frontendu",
       "license": "Licence",

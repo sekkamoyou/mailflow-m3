@@ -1943,7 +1943,8 @@
       "body": "이제 계정이 SSO 공급자에 연결되었습니다."
     },
     "about": {
-      "version": "버전",
+      "version": "백엔드 버전",
+      "frontendVersion": "프런트엔드 버전",
       "license": "라이선스",
       "subtitle": "오픈 소스, 자체 호스팅 이메일 클라이언트",
       "website": "웹사이트",

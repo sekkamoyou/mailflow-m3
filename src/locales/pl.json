@@ -1966,9 +1966,10 @@
     },
     "about": {
       "subtitle": "Otwarty, samodzielnie hostowany klient poczty e-mail",
-      "version": "Wersja",
+      "version": "Wersja backendu",
+      "frontendVersion": "Wersja frontendu",
       "backendBuild": "Kompilacja backendu",
-      "frontendBuild": "Wersja frontendu",
+      "frontendBuild": "Kompilacja frontendu",
       "license": "Licencja",
       "website": "Witryna internetowa",
       "sourceCode": "Kod źródłowy",

@@ -1947,7 +1947,8 @@
     },
     "about": {
       "subtitle": "开源自托管邮件客户端",
-      "version": "版本",
+      "version": "后端版本",
+      "frontendVersion": "前端版本",
       "backendBuild": "后端构建",
       "frontendBuild": "前端构建",
       "license": "许可证",
