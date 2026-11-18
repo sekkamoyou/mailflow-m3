@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+*.env.local
+.DS_Store
+node_modules/
+dist/
+.vite/
+packages/release/
+packages/android/
+*.local
+*.log
+
+.check-logs/
+__pycache__/

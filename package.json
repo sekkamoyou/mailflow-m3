@@ -1,0 +1,79 @@
+{
+  "name": "mailflow-m3",
+  "productName": "MailFlow M3",
+  "desktopName": "MailFlow M3",
+  "version": "4.4.0",
+  "description": "Independent Material 3 web frontend for MailFlow",
+  "homepage": "https://github.com/sekkamoyou/mailflow-m3",
+  "author": {
+    "name": "maathimself",
+    "email": "matthias@mailflow.sh"
+  },
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sekkamoyou/mailflow-m3.git"
+  },
+  "keywords": [
+    "Email",
+    "Webmail",
+    "Email Client",
+    "Unified Inbox",
+    "GUI"
+  ],
+  "license": "AGPL-3.0-only",
+  "bugs": {
+    "url": "https://github.com/sekkamoyou/mailflow-m3/issues"
+  },
+  "scripts": {
+    "dev": "node --max-old-space-size=384 node_modules/vite/bin/vite.js",
+    "build": "node --max-old-space-size=512 node_modules/vite/bin/vite.js build",
+    "preview": "node --max-old-space-size=256 node_modules/vite/bin/vite.js preview",
+    "test": "python3 scripts/test.py",
+    "lint": "node --max-old-space-size=384 node_modules/eslint/bin/eslint.js src --max-warnings 0"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@emoji-mart/data": "^1.2.1",
+    "@emoji-mart/react": "^1.1.1",
+    "@fontsource/roboto": "^5.2.8",
+    "@material/material-color-utilities": "0.3.0",
+    "@tiptap/core": "^3.31.3",
+    "@tiptap/extension-image": "^3.31.3",
+    "@tiptap/extension-link": "^3.31.3",
+    "@tiptap/extension-placeholder": "^3.31.3",
+    "@tiptap/extension-table": "^3.31.3",
+    "@tiptap/extension-table-cell": "^3.31.3",
+    "@tiptap/extension-table-header": "^3.31.3",
+    "@tiptap/extension-table-row": "^3.31.3",
+    "@tiptap/extension-text-align": "^3.31.3",
+    "@tiptap/extension-text-style": "^3.31.3",
+    "@tiptap/react": "^3.31.3",
+    "@tiptap/starter-kit": "^3.31.3",
+    "date-fns": "^3.3.1",
+    "dompurify": "^3.4.17",
+    "i18next": "^26.0.8",
+    "marked": "^18.0.6",
+    "material-symbols": "^0.40.2",
+    "pdfjs-dist": "^6.3.289",
+    "postcss": "^8.4.35",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-i18next": "^17.0.6",
+    "react-router-dom": "^6.22.0",
+    "zustand": "^4.5.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@vitejs/plugin-react": "^6.0.2",
+    "autoprefixer": "^10.4.18",
+    "axe-core": "^4.14.0",
+    "eslint": "^10.4.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.6.0",
+    "jsdom": "^30.0.1",
+    "tailwindcss": "^3.4.1",
+    "vite": "^8.0.16"
+  }
+}

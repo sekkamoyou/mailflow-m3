@@ -1,0 +1,25 @@
+services:
+  frontend-material:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_BUILD_SHA: ${GIT_SHA:-dev}
+        VITE_EMAIL_DIV_RENDER: ${VITE_EMAIL_DIV_RENDER:-false}
+        VITE_FRONTEND_SOURCE_URL: ${VITE_FRONTEND_SOURCE_URL:-}
+        VITE_BACKEND_SOURCE_URL: ${VITE_BACKEND_SOURCE_URL:-}
+        NGINX_BASE: ${NGINX_BASE:-nginx:alpine}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MATERIAL_HTTP_PORT:-8084}:80"
+    environment:
+      NGINX_TLS: "off"
+      BACKEND_HOST: ${BACKEND_HOST:-backend}
+      BACKEND_PORT: ${BACKEND_PORT:-3000}
+    networks:
+      - mailflow
+
+networks:
+  mailflow:
+    external: true
+    name: ${MAILFLOW_NETWORK:-mailflow_mailflow}

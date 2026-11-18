@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+.git
+*.local
+packages/android
+packages/release
+
+.check-logs
+qa
+docs
+**/__pycache__

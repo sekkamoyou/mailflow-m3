@@ -1,0 +1,14 @@
+.material-auth, .material-lock { color: var(--md-sys-color-on-surface); background: var(--md-sys-color-surface); font-family: var(--font-sans); }
+.material-auth__content { width: 100%; max-width: 440px; }
+.material-auth__surface { padding: 32px; border-radius: 28px; background: var(--md-sys-color-surface-container-low); }
+.material-auth h2 { font: 400 1.5rem/2rem var(--font-sans); }
+.material-auth label { line-height: 1.25rem; }
+.material-auth .md-input, .material-lock .md-input { width: 100%; min-height: 56px; }
+.mf-password-input { padding-right: 56px; }
+.mf-password-input:focus { padding-right: 55px; }
+.material-auth [role=alert], .material-lock [role=alert] { background: var(--md-sys-color-error-container) !important; color: var(--md-sys-color-on-error-container) !important; border: 0 !important; border-radius: 4px; }
+.material-auth a[href^='/auth/oidc/'] { min-height: 40px; border: 1px solid var(--md-sys-color-outline); border-radius: 20px; color: var(--md-sys-color-primary); }
+.material-lock { padding: 24px; }
+.material-lock > div { max-width: 400px; padding: 32px; border-radius: 28px; background: var(--md-sys-color-surface-container-low); }
+.material-error-boundary { background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface); }
+@media (max-width: 599px) { .material-auth { align-items: flex-start !important; padding: 24px 16px !important; } .material-auth__surface, .material-lock > div { padding: 24px; } }
