@@ -1,15 +1,76 @@
 # MailFlow M3
 
-This fork is based on [MailFlow v4.4.0](https://github.com/maathimself/mailflow/releases/tag/v4.4.0) (`1db523a`). Modified through 2026-11-18 for MailFlow M3. This fork is distributed under the [GNU Affero General Public License v3](LICENSE).
+MailFlow M3 is a self-hosted webmail client with a Material 3 interface and a companion backend. It is an independently maintained fork of [MailFlow v4.4.0 by Matthias and contributors](https://github.com/maathimself/mailflow/releases/tag/v4.4.0) (`1db523a`).
 
-The backend changes add appearance synchronization and instance branding, message metadata and previews, notification avatars and push priorities, OpenCode Go compatibility, and IMAP fixes. The upstream database migrations and API entry points are retained. The [MailFlow M3 web frontend](frontend-material/) and [backend](backend/) are developed in this repository. Follow the [MailFlow M3 frontend build instructions](frontend-material/README.md) and serve `frontend-material/dist/` with this backend. The original MailFlow frontend, its webfont notices, and the upstream setup guide remain below.
+[Run MailFlow M3](#run-mailflow-m3) · [Versions and build information](#versions-and-build-information) · [License and third-party notices](#license-and-third-party-notices) · [Upstream MailFlow reference](#upstream-mailflow-reference)
 
-When serving a modified version, provide users with links to the source revisions you actually deploy. MailFlow M3 accepts the backend source URL at build time through `VITE_BACKEND_SOURCE_URL`.
+## What MailFlow M3 adds
 
-[Upstream MailFlow](https://github.com/maathimself/mailflow) · [Bundled webfont notices](frontend/public/licenses/WEBFONTS.md)
+- **Web interface** — Material 3 navigation, controls, and dialogs for desktop and mobile, with refined Korean UI text.
+- **Appearance** — synchronize preferences between devices or keep separate desktop and mobile settings. Administrators can customize instance branding.
+- **Messages and notifications** — message-list previews and metadata, notification avatars, configurable push priority by mail category, and dismissal of an individual PWA notification after its message is marked read.
+- **Backend compatibility** — OpenCode Go support, Yahoo Japan IMAP provider detection, NAVER empty-folder handling, and fixes for reconciling messages deleted in other mail clients. The fork uses the upstream v4.4.0 database migrations.
+
+## Run MailFlow M3
+
+The [M3 web frontend](frontend-material/) and [companion backend](backend/) are in this repository. From a fresh clone, record the exact source revision for both builds:
+
+```sh
+git clone --branch mailflow-m3 https://github.com/sekkamoyou/mailflow-m3.git
+cd mailflow-m3
+
+export GIT_SHA="$(git rev-parse HEAD)"
+repo=https://github.com/sekkamoyou/mailflow-m3
+export VITE_FRONTEND_SOURCE_URL="$repo/tree/$GIT_SHA/frontend-material"
+export VITE_BACKEND_SOURCE_URL="$repo/tree/$GIT_SHA/backend"
+```
+
+### Docker Compose
+
+For a fresh install, copy [`.env.example`](.env.example) to `.env`. Set `APP_URL` to the public HTTPS address, such as `https://mail.example.com`, and generate `SESSION_SECRET`, `DB_PASSWORD`, and `ENCRYPTION_KEY` as described in the example file. Keep the existing `.env` and database when updating an installation.
+
+```sh
+docker compose -p mailflow-m3 up -d --build --wait backend
+MAILFLOW_NETWORK=mailflow-m3_mailflow docker compose --env-file .env \
+  -p mailflow-m3-ui -f frontend-material/compose.material.yml up -d --build
+```
+
+Point a same-host HTTPS reverse proxy to `http://127.0.0.1:8084`. Forward the public host and `X-Forwarded-Proto: https`, and enable WebSocket forwarding. The M3 frontend proxies backend routes over the shared Docker network.
+
+### Native install
+
+Use the [upstream v4.4.0 native setup](https://github.com/maathimself/mailflow/blob/v4.4.0/README.md#option-c--native-install-no-docker) for system dependencies, PostgreSQL, and backend environment settings. Use the M3 checkout above and build the web frontend with the Node.js version listed in the [frontend build guide](frontend-material/README.md#build-and-run):
+
+```sh
+(cd frontend-material && npm ci && VITE_BUILD_SHA="$GIT_SHA" npm run build)
+contrib/package-backend.sh "$GIT_SHA" > backend.tgz
+```
+
+Extract the backend archive into the installation directory and run `npm ci --omit=dev` from its `backend/` directory. The archive includes `backend/build.env` with the packaged commit as `BUILD_SHA`. Follow the setup instructions in the [systemd service](contrib/mailflow.service) to start the backend with that build hash and the existing application configuration.
+
+Serve `frontend-material/dist/` with a reverse proxy and follow the [frontend guide](frontend-material/README.md#build-and-run) for backend routes.
+
+## Versions and build information
+
+- **Frontend** — [`v0.1`](https://github.com/sekkamoyou/mailflow-m3/tree/v0.1) is the initial frontend tag. The frontend package version shown in **Settings → About** is `0.1.0`.
+- **Backend** — **Settings → About** displays the upstream API version with the fork suffix, for example `v4.4.0-m3`. The backend build is the first seven characters of the SHA reported by `/api/version`. The frontend build is derived from `VITE_BUILD_SHA`.
+- **Source links** — **Settings → About** uses the two source URLs set at frontend build time. Point each URL to the exact deployed revision and refresh the relevant link when a deployment changes it.
+
+## License and third-party notices
+
+MailFlow M3 is distributed under the [GNU Affero General Public License v3](LICENSE). See the [third-party notices](frontend-material/public/licenses/THIRD-PARTY.md) for [Roboto (SIL OFL 1.1)](frontend-material/public/licenses/Roboto.txt), [Material Symbols (Apache 2.0)](frontend-material/public/licenses/Material-Symbols.txt), and the app icon and notification badge. The bundled web fonts retain their [individual licenses and copyright notices](frontend-material/public/licenses/WEBFONTS.md).
+
+---
+
+## Upstream MailFlow reference
+
+The [upstream repository](https://github.com/maathimself/mailflow) maintains the original MailFlow documentation.
+
+<details>
+<summary>Show upstream MailFlow documentation</summary>
 
 <p align="center">
-  <img src="media/mailflow-logo.png" width="200" alt="MailFlow Logo">
+  <img src="media/mailflow-logo.png" width="200" alt="Upstream MailFlow logo">
 </p>
 
 <p align="center">
@@ -17,15 +78,15 @@ When serving a modified version, provide users with links to the source revision
 </p>
 
 <p align="center">
-  <a href="#installation">Quick Start</a> ·
+  <a href="#upstream-mailflow-installation">Upstream installation</a> ·
   <a href="#email-provider-setup">Setup Guide</a> ·
   <a href="#supporters">Support MailFlow</a> ·
   <a href="https://mailflow.sh/#roadmap">Roadmap</a>
 </p>
 
-## Licensing
+## Upstream MailFlow licensing
 
-Licensing and paid options:
+The licensing and paid support options below are published by the upstream MailFlow project.
 
 - **[AGPL-3.0](LICENSE)**: free for everyone, individuals and businesses, to self-host. If you modify MailFlow and let others use it over a network, you must publish your changes under the same license.
 - **Business License**: $100 per instance per year, plus tax. MailFlow is free for everyone under the AGPL, including businesses. If you use it in a business, we ask you to buy a yearly license to support development. It isn't legally required or enforced. [Buy one here](https://mailflow.sh/#pricing), or sponsor at $40/month on [GitHub Sponsors](https://github.com/sponsors/maathimself), which includes one.
@@ -35,10 +96,10 @@ Licensing and paid options:
 
 **Personal self-hosting is free and always will be.**
 
-If you contribute code, please read the [Contributor License Agreement](CLA.md). By submitting a pull request you agree to its terms.
+For contributions to upstream MailFlow, see its [Contributor License Agreement](CLA.md).
 
 
-## Features
+## Upstream MailFlow features
 
 - **Unified inbox** — all accounts merged in one view, sorted by date
 - **Sender imagery** — real manual/CardDAV contact photos take priority, with optional domain favicons proxied and cached through Twenty Icons and deterministic initials as the offline fallback; disable sender favicons under Appearance to prevent lookups for your user
@@ -99,7 +160,7 @@ with GTD off behave exactly as before.
 
 ---
 
-## Screenshots
+## Upstream MailFlow screenshots
 
 <table>
   <tr>
@@ -126,9 +187,9 @@ with GTD off behave exactly as before.
 
 ---
 
-## Installation
+## Upstream MailFlow installation
 
-There are three ways to run MailFlow. The pre-built image method is recommended for most users.
+Upstream MailFlow provides the three installation methods below. The pre-built images come from the upstream project.
 
 ---
 
@@ -670,7 +731,7 @@ Caddy  (frontend container — ports 80/443, certificate from Let's Encrypt)
   └── backend, PostgreSQL (internal network, unchanged)
 ```
 
-## Desktop and Android apps
+## Upstream desktop and Android apps
 
 MailFlow remains a self-hosted web app, but the repository includes native wrappers for users who prefer an installed desktop or mobile application:
 
@@ -774,3 +835,5 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md). Please don't open a p
 - IMAP/SMTP credentials are stored at rest in the database (standard for webmail clients — protect access to your server and database volume accordingly)
 - Responses set a strict `Content-Security-Policy`, clickjacking protection via `X-Frame-Options`, and a restrictive `Referrer-Policy`
 - Email HTML is sanitized before rendering, including stripping external `url()` references from CSS style blocks to prevent tracking
+
+</details>
