@@ -206,3 +206,15 @@ export async function getSenderFavicon(domain, {
   if (!normalized) return miss('invalid-image');
   return resolveDomain(normalized, { cache, fetchImpl, timeoutMs, maxBytes });
 }
+
+// Push delivery reuses stored bytes without starting a provider request or parent walk.
+export async function getCachedSenderFavicon(domain, { cache = kv } = {}) {
+  const normalized = normalizeSenderDomain(domain);
+  if (!normalized) return null;
+  try {
+    const value = await cache.get(cacheKey(normalized));
+    if (value == null) return null;
+    const result = parseCached(value);
+    return result.kind === 'image' ? result.bytes : null;
+  } catch { return null; }
+}

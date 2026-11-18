@@ -355,6 +355,8 @@ export function newMailPushPayload(alertMessages, alertCount) {
   const payload = {
     title: latest.fromName || latest.fromEmail || 'New mail',
     body: alertCount === 1 ? (latest.subject || '(no subject)') : `${alertCount} new messages`,
+    avatarMessageId: latest.id,
+    pushMessageIds: alertMessages.map(message => message.id),
     icon: '/icon-512.png',
     badge: '/badge-96.png',
     // Fall back to the inbox if the id is somehow absent.

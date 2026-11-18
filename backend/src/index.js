@@ -35,6 +35,7 @@ import { loadBundledPlugins } from './plugins/loadPlugins.js';
 import { setMailEngine } from './plugins/mailEngine.js';
 import pluginsRoutes from './routes/plugins.js';
 import senderFaviconsRoutes from './routes/senderFavicons.js';
+import notificationAvatarRoutes from './routes/notificationAvatar.js';
 import diagnosticsRoutes from './routes/diagnostics.js';
 import backupRoutes from './routes/backup.js';
 import apiTokenRoutes from './routes/apiTokens.js';
@@ -183,6 +184,7 @@ for (const plugin of pluginRegistry.list()) {
   if (plugin.router) app.use(plugin.router.base, plugin.router.handler);
 }
 app.use('/api/sender-favicons', senderFaviconsRoutes);
+app.use('/api/notification-avatar', notificationAvatarRoutes);
 app.use('/api/diagnostics', diagnosticsRoutes);
 
 // CardDAV server — body is read lazily inside each handler via rawBody()

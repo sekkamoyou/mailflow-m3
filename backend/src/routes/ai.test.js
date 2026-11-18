@@ -334,7 +334,7 @@ describe('authenticated AI status and streaming', () => {
     );
     expect(mocks.streamChat).toHaveBeenCalledWith(
       [{ role: 'system', content: aiLanguageInstruction('en') }, ...messages],
-      { signal: expect.any(AbortSignal) },
+      { signal: expect.any(AbortSignal), userId: MEMBER },
     );
   });
 

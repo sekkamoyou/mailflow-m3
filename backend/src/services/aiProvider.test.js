@@ -277,6 +277,8 @@ describe('API-key provider regression', () => {
     const [url, init] = fetchFn.mock.calls[0];
     expect(url).toBe('https://api.example/v1/chat/completions');
     expect(init.headers.Authorization).toBe('Bearer api-secret');
+    expect(init.headers).not.toHaveProperty('x-opencode-session');
+    expect(init.headers).not.toHaveProperty('User-Agent');
     expect(JSON.parse(init.body)).toEqual({
       model: 'legacy-model',
       messages: [{ role: 'user', content: 'Hi' }],
@@ -290,6 +292,36 @@ describe('API-key provider regression', () => {
     const { provider } = factory({ initial: { ...legacy, apiKey: null }, fetchFn });
     await provider.completeText([{ role: 'user', content: 'Hi' }]);
     expect(fetchFn.mock.calls[0][1].headers).not.toHaveProperty('Authorization');
+  });
+
+  it('identifies MailFlow to OpenCode Go and keeps sessions stable and user-scoped', async () => {
+    const fetchFn = vi.fn().mockImplementation(async () => jsonResponse({ choices: [{ message: { content: 'ok' } }] }));
+    const { provider } = factory({ initial: { ...legacy, baseUrl: 'https://opencode.ai/inference/go/openai/v1' }, fetchFn });
+    const messages = [{ role: 'user', content: 'Summarize this private email' }];
+    await provider.completeText(messages, { userId: 'first-user' });
+    await provider.completeText([...messages, { role: 'assistant', content: 'Summary' }, { role: 'user', content: 'Shorter' }], { userId: 'first-user' });
+    await provider.completeText(messages, { userId: 'second-user' });
+    await provider.completeText([{ role: 'user', content: 'Another email' }], { userId: 'first-user' });
+    const headers = fetchFn.mock.calls.map(([, init]) => init.headers);
+    expect(headers[0]['User-Agent']).toMatch(/^MailFlow\//);
+    expect(headers[0]['x-opencode-session']).toMatch(/^[0-9a-f]{64}$/);
+    expect(headers[1]['x-opencode-session']).toBe(headers[0]['x-opencode-session']);
+    expect(headers[2]['x-opencode-session']).not.toBe(headers[0]['x-opencode-session']);
+    expect(headers[3]['x-opencode-session']).not.toBe(headers[0]['x-opencode-session']);
+    for (const value of ['first-user', 'private email', 'api-secret']) {
+      expect(headers[0]['x-opencode-session']).not.toContain(value);
+    }
+  });
+
+  it('sends the same OpenCode Go session in streaming and non-streaming requests', async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ choices: [{ message: { content: 'ok' } }] }))
+      .mockResolvedValueOnce(sseResponse([completionEvent('ok'), 'data: [DONE]\n\n']));
+    const { provider } = factory({ initial: { ...legacy, baseUrl: 'https://opencode.ai/inference/go/openai/v1' }, fetchFn });
+    const messages = [{ role: 'user', content: 'Hi' }];
+    await provider.completeText(messages, { userId: 'first-user' });
+    await expect(collect(provider.streamChat(messages, { userId: 'first-user' }))).resolves.toEqual(['ok']);
+    expect(fetchFn.mock.calls[1][1].headers).toEqual(fetchFn.mock.calls[0][1].headers);
   });
 
   it('surfaces the finish reason when a real completion returns null content', async () => {

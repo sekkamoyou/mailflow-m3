@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { validateAppDisplayName } from '../services/appBranding.js';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { query, withTransaction } from '../services/db.js';
@@ -359,6 +360,16 @@ router.get('/auth-events', async (req, res) => {
 });
 
 router.patch('/settings', async (req, res) => {
+  if (req.body.app_display_name !== undefined) {
+    let displayName;
+    try { displayName = validateAppDisplayName(req.body.app_display_name); }
+    catch (err) { return res.status(400).json({ error: err.message, code: 'INVALID_APP_NAME' }); }
+    await query(
+      `INSERT INTO system_settings (key, value, updated_at) VALUES ('app_display_name', $1, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`, [displayName],
+    );
+  }
+
   const { registration_open, internal_auth_disabled, auth_max_attempts, auth_window_minutes,
     allow_private_hosts, allow_insecure_tls, allow_nonstandard_ports,
     mfa_enforcement, mfa_device_trust, custom_css, backup_include_mail, api_tokens_enabled } = req.body;

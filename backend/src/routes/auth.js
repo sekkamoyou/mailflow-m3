@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import { getAppDisplayName, materialManifest, storedAppDisplayName } from '../services/appBranding.js';
+import { saveMaterialAppearance, validateAppearanceOperation } from '../services/materialAppearance.js';
+import { normalizePushPriorities, validPushPriorities } from '../services/pushPriorities.js';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { authenticator } from 'otplib';
@@ -628,14 +631,21 @@ router.delete('/avatar', async (req, res) => {
 // Public endpoint: check registration and auth settings (used by login page)
 router.get('/registration-status', async (req, res) => {
   const result = await query(
-    "SELECT key, value FROM system_settings WHERE key IN ('registration_open', 'internal_auth_disabled')"
+    "SELECT key, value FROM system_settings WHERE key IN ('registration_open', 'internal_auth_disabled', 'app_display_name')"
   );
   const map = {};
   for (const row of result.rows) map[row.key] = row.value;
   res.json({
+    displayName: storedAppDisplayName(map.app_display_name),
     open: map.registration_open === 'true',
     internalAuthDisabled: map.internal_auth_disabled === 'true',
   });
+});
+
+// The separate Material frontend uses this stable manifest URL for new PWA installs.
+router.get('/material-manifest', async (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.type('application/manifest+json').json(materialManifest(await getAppDisplayName()));
 });
 
 // Public endpoint: validate an invite token before showing the registration form
@@ -658,7 +668,7 @@ router.get('/preferences', async (req, res) => {
   const prefs = userResult.rows[0]?.preferences || {};
   const customCss = cssResult.rows[0]?.value;
   if (customCss) prefs.customCss = customCss;
-  res.json(prefs);
+  res.json({ ...prefs, pushPriorities: normalizePushPriorities(prefs.pushPriorities), materialAppearanceOwnerId: req.session.userId });
 });
 
 // Each folder's list order (#528, #196): { "<accountId or all>:<folder>": { sort, dir, starredFirst } }.
@@ -683,6 +693,19 @@ export function sanitizeListSort(listSort) {
 
 export async function patchPreferences(req, res) {
   if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' });
+  if (Object.hasOwn(req.body, 'pushPriorities') && !validPushPriorities(req.body.pushPriorities)) {
+    return res.status(400).json({ error: 'pushPriorities must map known categories to high, normal, low or very-low' });
+  }
+  if (Object.hasOwn(req.body, 'materialAppearance')) {
+    const operation = req.body.materialAppearance;
+    if (Object.keys(req.body).length !== 1 || !validateAppearanceOperation(operation)) {
+      return res.status(400).json({ error: 'Invalid Material appearance settings' });
+    }
+    if (operation.ownerId !== req.session.userId) return res.status(409).json({ error: 'User changed' });
+    const materialAppearance = await saveMaterialAppearance(req.session.userId, operation);
+    imapManager.broadcast({ type: 'material_appearance_updated' }, req.session.userId);
+    return res.json({ ok: true, materialAppearance });
+  }
   const { theme, font, layout, notificationSound, pageSize, scrollMode, syncInterval,
           blockRemoteImages, imageWhitelist, shortcuts, hiddenFolders, language,
           threadedView, plaintextEmail, hoverQuickActions, swipeActions,
@@ -819,6 +842,7 @@ export async function patchPreferences(req, res) {
       || CASE WHEN $46::text IS NOT NULL THEN jsonb_build_object('afterRemove', $46::text) ELSE '{}'::jsonb END
       || CASE WHEN $47::boolean IS NOT NULL THEN jsonb_build_object('darkEmailBodies', $47::boolean) ELSE '{}'::jsonb END
       || CASE WHEN $48::jsonb IS NOT NULL THEN jsonb_build_object('listSort', $48::jsonb) ELSE '{}'::jsonb END
+      || CASE WHEN $49::jsonb IS NOT NULL THEN jsonb_build_object('pushPriorities', COALESCE(preferences->'pushPriorities', '{}'::jsonb) || $49::jsonb) ELSE '{}'::jsonb END
     WHERE id = $1
   `, [req.session.userId, theme ?? null, font ?? null, layout ?? null, notificationSound ?? null,
       pageSize ?? null, scrollMode ?? null, syncInterval ?? null,
@@ -830,7 +854,8 @@ export async function patchPreferences(req, res) {
       rightSidebarWidth, rightSidebarHidden, gtdCollapsedSectionsJson, gtdPetSlug, autoLockMinutesVal,
       showMobileAvatars ?? null, gravatarAvatars ?? null, folderSyncIntervalVal, folderOrderJson, senderFaviconsVal,
       showMessagePreviews ?? null, defaultSenderVal, conversationModeVal, hoverActionSetJson, autoOpenReplyDrafts ?? null,
-      afterRemoveVal, darkEmailBodies ?? null, listSortJson]);
+      afterRemoveVal, darkEmailBodies ?? null, listSortJson,
+      req.body.pushPriorities === undefined ? null : JSON.stringify(req.body.pushPriorities)]);
 
   if (syncInterval != null) {
     const ms = parseInt(syncInterval) * 1000;

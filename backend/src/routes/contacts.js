@@ -5,6 +5,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { generateVCard, photoContentType } from '../utils/vcard.js';
 import { safeFetch } from '../services/safeFetch.js';
 import crypto from 'crypto';
+import { gravatarCache, gravatarCacheSet } from '../services/gravatarCache.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -12,17 +13,8 @@ router.use(requireAuth);
 // In-memory cache for Gravatar lookups (hash -> { buf, type } hit or { miss:true }).
 // Bounded + TTL'd so we don't re-hit Gravatar for every list render and so the number of
 // third-party requests stays minimal (a privacy consideration — see the /gravatar route).
-const gravatarCache = new Map();
-const GRAVATAR_TTL_MS      = 24 * 60 * 60 * 1000; // hits: 24h
-const GRAVATAR_MISS_TTL_MS =  6 * 60 * 60 * 1000; // 404s: 6h
-const GRAVATAR_MAX_ENTRIES = 2000;
-function gravatarCacheSet(hash, entry) {
-  if (gravatarCache.size >= GRAVATAR_MAX_ENTRIES) {
-    const oldest = gravatarCache.keys().next().value;
-    if (oldest !== undefined) gravatarCache.delete(oldest);
-  }
-  gravatarCache.set(hash, entry);
-}
+const GRAVATAR_TTL_MS      = 24 * 60 * 60 * 1000;
+const GRAVATAR_MISS_TTL_MS =  6 * 60 * 60 * 1000;
 
 // Resolve the user's default address book id, creating it if needed.
 async function defaultAddressBook(userId) {

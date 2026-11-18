@@ -1,3 +1,13 @@
+# MailFlow fork for MailFlow M3
+
+This fork is based on [MailFlow v4.4.0](https://github.com/maathimself/mailflow/releases/tag/v4.4.0) (`1db523a`). Modified through 2026-11-18 for [MailFlow M3](https://github.com/sekkamoyou/mailflow-m3). This fork is distributed under the [GNU Affero General Public License v3](LICENSE).
+
+The backend changes add appearance synchronization and instance branding, message metadata and previews, notification avatars and push priorities, OpenCode Go compatibility, and IMAP fixes. The upstream database migrations and API entry points are retained. For deployment with Material, build its web frontend from the separate repository and serve its `dist/` with this backend. Use the upstream backend setup below. The standard MailFlow frontend is included with its webfont notices.
+
+When serving a modified version, provide users with links to the source revisions you actually deploy. MailFlow M3 accepts the backend source URL at build time through `VITE_BACKEND_SOURCE_URL`.
+
+[Upstream MailFlow](https://github.com/maathimself/mailflow) · [Bundled webfont notices](frontend/public/licenses/WEBFONTS.md)
+
 <p align="center">
   <img src="media/mailflow-logo.png" width="200" alt="MailFlow Logo">
 </p>

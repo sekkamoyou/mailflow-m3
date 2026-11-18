@@ -1,5 +1,8 @@
 import webPush from 'web-push';
 import { query } from './db.js';
+import { notificationAvatarUrl } from './notificationAvatar.js';
+import { selectPushUrgency } from './pushPriorities.js';
+import { UUID_RE } from '../utils/uuid.js';
 
 const vapidPublicKey  = process.env.VAPID_PUBLIC_KEY;
 const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
@@ -26,12 +29,28 @@ export async function sendPushToUser(userId, payload) {
   if (!pushConfigured) return;
 
   const result = await query(
-    'SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = $1',
+    `SELECT p.id, p.endpoint, p.p256dh, p.auth, u.preferences->'pushPriorities' AS push_priorities
+     FROM push_subscriptions p JOIN users u ON u.id = p.user_id WHERE p.user_id = $1`,
     [userId]
   );
   if (result.rows.length === 0) return;
 
-  const body = JSON.stringify(payload);
+  const { avatarMessageId, pushMessageIds, ...notification } = payload;
+  const ids = Array.isArray(pushMessageIds) ? pushMessageIds.filter(id => typeof id === 'string' && UUID_RE.test(id)) : [];
+  let urgency = 'high';
+  if (ids.length) {
+    try {
+      const categories = await query(
+        `SELECT m.category FROM messages m JOIN email_accounts a ON a.id = m.account_id
+         WHERE m.id = ANY($1::uuid[]) AND a.user_id = $2 AND m.is_deleted = false`,
+        [ids, userId]
+      );
+      urgency = selectPushUrgency(result.rows[0].push_priorities, categories.rows.map(row => row.category));
+    } catch {
+      // A classification lookup failure must not drop a new-mail notification.
+      console.warn('Push priority lookup failed; sending with high urgency');
+    }
+  }
   const staleIds = [];
 
   await Promise.allSettled(result.rows.map(async (row) => {
@@ -40,11 +59,14 @@ export async function sendPushToUser(userId, payload) {
       keys: { p256dh: row.p256dh, auth: row.auth },
     };
     try {
+      const avatar = notificationAvatarUrl(row.id, avatarMessageId);
+      const body = JSON.stringify({ ...notification, ...(avatar ? { avatar } : {}) });
       await webPush.sendNotification(subscription, body, {
         // TTL: how long (seconds) the push service should retain an undelivered message.
         // 24 hours is reasonable for email notifications — if the device is offline
         // longer than that, the notification is no longer timely.
         TTL: 86400,
+        urgency,
       });
     } catch (err) {
       if (err.statusCode === 410 || err.statusCode === 404) {

@@ -4,9 +4,22 @@ import {
   readBodyLimited,
   validateSquarePng,
   getSenderFavicon,
+  getCachedSenderFavicon,
 } from './senderFavicon.js';
+import { kv } from './kvStore.js';
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+it('push avatar lookup reads the PostgreSQL cache by default', async () => {
+  const bytes = png();
+  const get = vi.spyOn(kv, 'get').mockResolvedValue(JSON.stringify({ v: 1, kind: 'image', pngBase64: bytes.toString('base64') }));
+  try {
+    expect(await getCachedSenderFavicon('EXAMPLE.COM')).toEqual(bytes);
+    expect(get).toHaveBeenCalledTimes(1);
+  } finally {
+    get.mockRestore();
+  }
+});
 
 function png(width = 64, height = width, extraBytes = 0) {
   const out = Buffer.alloc(24 + extraBytes);
@@ -580,5 +593,20 @@ describe('getSenderFavicon parent walk-up', () => {
     expect(urls(fetchImpl).at(-1)).toBe(url('i.com'));
     expect(fetchImpl).toHaveBeenCalledTimes(9);
     expect(cache.set).toHaveBeenCalledTimes(9);
+  });
+});
+
+describe('notification cache-only favicon reads', () => {
+  it('returns stored validated bytes and never starts provider resolution on a miss', async () => {
+    const { getCachedSenderFavicon } = await import('./senderFavicon.js');
+    const cache = cacheDouble();
+    expect(await getCachedSenderFavicon('example.com', { cache })).toBeNull();
+    const bytes = png();
+    await getSenderFavicon('example.com', { cache, fetchImpl: vi.fn(async () => response(bytes)) });
+    expect(await getCachedSenderFavicon('Example.COM', { cache })).toEqual(bytes);
+    expect(await getCachedSenderFavicon('not-a-domain', { cache })).toBeNull();
+    expect(await getCachedSenderFavicon('example.com', { cache: { get: async () => { throw new Error('offline'); } } })).toBeNull();
+    cache.values.set([...cache.values.keys()][0], 'malformed');
+    expect(await getCachedSenderFavicon('example.com', { cache })).toBeNull();
   });
 });

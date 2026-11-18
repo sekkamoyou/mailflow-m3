@@ -990,13 +990,13 @@ describe('newMailPushPayload', () => {
   it('names the one message a single alert is about, so its card can act on it', () => {
     expect(newMailPushPayload([a], 1)).toEqual({
       title: 'Ann', body: 'Hi', icon: '/icon-512.png', badge: '/badge-96.png',
-      url: `/?m=${a.id}`, messageId: a.id,
+      url: `/?m=${a.id}`, messageId: a.id, avatarMessageId: a.id, pushMessageIds: [a.id],
     });
   });
 
   it('leaves the id out of a card that summarizes several messages', () => {
     const payload = newMailPushPayload([a, b], 2);
-    expect(payload).toMatchObject({ title: 'bob@x', body: '2 new messages', url: `/?m=${b.id}` });
+    expect(payload).toMatchObject({ title: 'bob@x', body: '2 new messages', url: `/?m=${b.id}`, avatarMessageId: b.id, pushMessageIds: [a.id, b.id] });
     expect(payload).not.toHaveProperty('messageId');
   });
 

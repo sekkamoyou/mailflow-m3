@@ -1746,7 +1746,7 @@ export async function emitSectionsChanged(mgr, account, changedCount) {
 export function providerProfile(account) {
   const host = (account.imap_host || '').toLowerCase();
   if (host.includes('.gmail.com') || host.includes('.googlemail.com')) return PROVIDERS.google;
-  if (host.includes('.yahoo.com') || host.includes('.ymail.com')) return PROVIDERS.yahoo;
+  if (host.includes('.yahoo.com') || host.includes('.ymail.com') || host.endsWith('.yahoo.co.jp')) return PROVIDERS.yahoo;
   if (host.includes('.icloud.com') || host.includes('.apple.com') || host.includes('.me.com')) return PROVIDERS.apple;
   if (host.includes('.outlook.com') || host.includes('office365.com') || host.includes('.hotmail.com') || host.includes('.live.com') || (account.oauth_provider === 'microsoft')) return PROVIDERS.microsoft;
   if (host.includes('purelymail.com')) return PROVIDERS.purelymail;
@@ -4958,7 +4958,8 @@ export class ImapManager {
         // UIDVALIDITY check — detects server-side mailbox rebuilds (migration, restore).
         // If UIDVALIDITY changed, all stored UIDs for this folder are invalid; purge them
         // and let backfill re-populate from the new UID epoch.
-        const currentValidity = mailbox.uidValidity ? Number(mailbox.uidValidity) : null;
+        // Preserve NAVER's empty-folder zero so the guarded integrity cleanup can match it.
+        const currentValidity = mailbox.uidValidity != null ? Number(mailbox.uidValidity) : null;
         // CONDSTORE HIGHESTMODSEQ read at SELECT time (M). ImapFlow auto-enables CONDSTORE on
         // connect, so this is populated on any server that supports it and null otherwise —
         // in which case delta sync transparently falls back to the full UID/sequence phases.
@@ -4971,7 +4972,7 @@ export class ImapManager {
             'SELECT uid_validity, highest_modseq FROM folders WHERE account_id = $1 AND path = $2',
             [account.id, folder]
           );
-          const storedValidity = foldRow.rows[0]?.uid_validity ? Number(foldRow.rows[0].uid_validity) : null;
+          const storedValidity = foldRow.rows[0]?.uid_validity != null ? Number(foldRow.rows[0].uid_validity) : null;
           storedModseq = foldRow.rows[0]?.highest_modseq ?? null;
           if (storedValidity !== null && storedValidity !== currentValidity) {
             uidValidityChanged = true;
@@ -8272,6 +8273,7 @@ export class ImapManager {
       if (!client) {
         console.log(`syncNow: ${logAccount(account)} not connected, reconnecting`);
         await this.connectAccount(account);
+        await this.reconcileDeletes(account).catch(err => console.warn(`Manual delete reconciliation failed for ${logAccount(account)}:`, extractImapError(err)));
         return;
       }
       this.syncingAccounts.add(account.id);
@@ -8292,6 +8294,7 @@ export class ImapManager {
           // sync either) for all of it. On the timeout the catch below closes the client.
           await raceTimeout(this.syncMessages(account, client, 'INBOX', 20, false, true), 55000, 'Manual sync');
         }
+        await this.reconcileDeletes(account).catch(err => console.warn(`Manual delete reconciliation failed for ${logAccount(account)}:`, extractImapError(err)));
         console.log(`syncNow complete: ${logAccount(account)}`);
       } catch (err) {
         console.error(`syncNow error for ${logAccount(account)}:`, err.message);

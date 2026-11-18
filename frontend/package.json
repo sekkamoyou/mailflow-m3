@@ -22,7 +22,7 @@
     "Unified Inbox",
     "GUI"
   ],
-  "license": "GPL-3.0",
+  "license": "AGPL-3.0-only",
   "bugs": {
     "url": "https://github.com/maathimself/mailflow/issues"
   },

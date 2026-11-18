@@ -23,10 +23,12 @@ export function folderStaleMs(selectableFolders) {
 export const STATUS_QUERY = { messages: true, unseen: true, uidNext: true, uidValidity: true, highestModseq: true };
 
 export function validFolderStatus(s) {
+  // NAVER uses UIDVALIDITY=0 when empty; a non-empty mailbox still requires a real epoch.
   return !!s && Number.isSafeInteger(s.messages) && s.messages >= 0 &&
     Number.isSafeInteger(s.unseen) && s.unseen >= 0 && s.unseen <= s.messages &&
     Number.isSafeInteger(s.uidNext) && s.uidNext > 0 &&
-    /^(?:[1-9][0-9]*)$/.test(String(s.uidValidity));
+    (/^(?:[1-9][0-9]*)$/.test(String(s.uidValidity)) ||
+      (s.messages === 0 && String(s.uidValidity) === '0'));
 }
 
 export function folderNeedsSync(row, s, now = Date.now()) {

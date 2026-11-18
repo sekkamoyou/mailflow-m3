@@ -6,6 +6,8 @@ import { createRequestSignal, parseJson, readLimited, readSseData, sanitizeText 
 import { completeCodexText, streamCodexResponses } from './openaiCodexResponses.js';
 import { getCodexAccess, getCodexStatus } from './openaiCodexAuth.js';
 import { aiEnabledForNewUser, setAiEnabledForNewUser } from './aiNewUsers.js';
+import { createHmac } from 'node:crypto';
+import { MAILER_ID } from './mailerIdentity.js';
 
 export const AI_PROVIDER_API_KEY = 'api-key';
 export const AI_PROVIDER_CHATGPT = 'chatgpt';
@@ -246,13 +248,20 @@ export function createAiProvider({
     return config.apiKeyConfig.apiKey ? decryptFn(config.apiKeyConfig.apiKey) : null;
   }
 
-  function apiKeyHeaders(apiKey) {
+  function apiKeyHeaders(config, apiKey, messages, userId) {
     const headers = { 'Content-Type': 'application/json' };
     if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+    if (config.apiKeyConfig.baseUrl === 'https://opencode.ai/inference/go/openai/v1') {
+      headers['User-Agent'] = MAILER_ID.replace(' ', '/');
+      // Keep routing stable across follow-ups without exposing user IDs or email text.
+      headers['x-opencode-session'] = createHmac('sha256', apiKey || 'mailflow')
+        .update(JSON.stringify([userId || '', messages.find(message => message.role === 'user')?.content || '']))
+        .digest('hex');
+    }
     return headers;
   }
 
-  async function completeApiKey(config, messages, { signal, maxTokens, allowEmpty = false } = {}) {
+  async function completeApiKey(config, messages, { signal, maxTokens, allowEmpty = false, userId } = {}) {
     const apiKey = apiKeyCredential(config);
     const body = {
       model: config.apiKeyConfig.model,
@@ -262,7 +271,7 @@ export function createAiProvider({
     };
     const request = await openProviderRequest(fetchFn, `${config.apiKeyConfig.baseUrl}/chat/completions`, {
       method: 'POST',
-      headers: apiKeyHeaders(apiKey),
+      headers: apiKeyHeaders(config, apiKey, messages, userId),
       body: JSON.stringify(body),
     }, { signal });
     try {
@@ -295,11 +304,11 @@ export function createAiProvider({
     }
   }
 
-  async function* streamApiKey(config, messages, { signal } = {}) {
+  async function* streamApiKey(config, messages, { signal, userId } = {}) {
     const apiKey = apiKeyCredential(config);
     const request = await openProviderRequest(fetchFn, `${config.apiKeyConfig.baseUrl}/chat/completions`, {
       method: 'POST',
-      headers: apiKeyHeaders(apiKey),
+      headers: apiKeyHeaders(config, apiKey, messages, userId),
       body: JSON.stringify({ model: config.apiKeyConfig.model, messages, stream: true }),
     }, { signal, timeoutMs: 120_000 });
     try {

@@ -1,3 +1,4 @@
+import { messageMetadata } from '../services/messageMetadata.js';
 import { STATUS_STALE_MS } from '../services/folderStatus.js';
 import { Router } from 'express';
 import { createRequire } from 'module';
@@ -178,6 +179,15 @@ function notifyMailMutation(rows, userId) {
     }).catch(err => console.warn('onMailMutation hook failed:', err.message));
   }
 }
+
+// Metadata for one displayed page; request bodies remain bounded and owner scoped.
+router.post('/message-metadata', async (req, res) => {
+  const ids = req.body?.ids;
+  if (!Array.isArray(ids) || ids.length > 500 || ids.some(id => typeof id !== 'string' || !UUID_RE.test(id))) {
+    return res.status(400).json({ error: 'Invalid message IDs' });
+  }
+  res.json({ messages: await messageMetadata(req.session.userId, [...new Set(ids)]) });
+});
 
 // Get messages (unified or per-account/folder)
 router.get('/messages', async (req, res) => {
@@ -602,6 +612,7 @@ router.get('/messages/:id/body', async (req, res) => {
     if (!message.snippet || snippetIsGarbled(message.snippet)) {
       const snip = snippetFromBody(message.body_text, html);
       if (snip) {
+        message.snippet = snip;
         query('UPDATE messages SET snippet = $1 WHERE id = $2', [sanitizeDbText(snip), id]).catch(() => {});
       }
     }
@@ -629,7 +640,7 @@ router.get('/messages/:id/body', async (req, res) => {
     const imageStats = {};
     if (remoteImagesProxied && shown) responseHtml = proxyRemoteImages(shown, (raw, width) => imageProxyPath(id, raw, width), imageStats);
     const inline = req.query.original === '1' ? { html: responseHtml, count: 0 } : await fitInlineImages(responseHtml, req.session.userId);
-    return res.json({ ...splitDarkScheme(inline.html), inlineImagesFitted: inline.count > 0, text: message.body_text, attachments: cachedAttachments, hasBlockedRemoteImages, remoteImagesBlocked, remoteImagesProxied, trackersBlocked: imageStats.trackers ?? 0, senderEmail: message.sender_email, senderName: message.sender_name, forwardedFromEmail: message.forwarded_from_email, forwardedFromName: message.forwarded_from_name, forwardedVia: message.forwarded_via, bccAddresses: bccOf(message) });
+    return res.json({ ...splitDarkScheme(inline.html), inlineImagesFitted: inline.count > 0, text: message.body_text, snippet: message.snippet || snippetFromBody(message.body_text, html), attachments: cachedAttachments, hasBlockedRemoteImages, remoteImagesBlocked, remoteImagesProxied, trackersBlocked: imageStats.trackers ?? 0, senderEmail: message.sender_email, senderName: message.sender_name, forwardedFromEmail: message.forwarded_from_email, forwardedFromName: message.forwarded_from_name, forwardedVia: message.forwarded_via, bccAddresses: bccOf(message) });
   };
   // A body fetched from the mail server and stored (storeFetchedBody), as the response gives it.
   const serveFetched = async ({ sanitized, safeText, attachments }) => {
@@ -651,7 +662,7 @@ router.get('/messages/:id/body', async (req, res) => {
     const imageStats = {};
     if (remoteImagesProxied && sanitized) responseHtml = proxyRemoteImages(sanitized, (raw, width) => imageProxyPath(id, raw, width), imageStats);
     const inline = req.query.original === '1' ? { html: responseHtml, count: 0 } : await fitInlineImages(responseHtml, req.session.userId);
-    return res.json({ ...splitDarkScheme(inline.html), inlineImagesFitted: inline.count > 0, text: safeText, attachments: attachments || [], hasBlockedRemoteImages, remoteImagesBlocked, remoteImagesProxied, trackersBlocked: imageStats.trackers ?? 0, senderEmail: message.sender_email, senderName: message.sender_name, forwardedFromEmail: message.forwarded_from_email, forwardedFromName: message.forwarded_from_name, forwardedVia: message.forwarded_via, bccAddresses: bccOf(message) });
+    return res.json({ ...splitDarkScheme(inline.html), inlineImagesFitted: inline.count > 0, text: safeText, snippet: snippetFromBody(safeText, sanitized), attachments: attachments || [], hasBlockedRemoteImages, remoteImagesBlocked, remoteImagesProxied, trackersBlocked: imageStats.trackers ?? 0, senderEmail: message.sender_email, senderName: message.sender_name, forwardedFromEmail: message.forwarded_from_email, forwardedFromName: message.forwarded_from_name, forwardedVia: message.forwarded_via, bccAddresses: bccOf(message) });
   };
   // A prefetch (?prefetch=1): the client loading a row the pointer rests on, ahead of a click that
   // may never come (#677). It gets a stored body as any view does, and fetches from the mail server

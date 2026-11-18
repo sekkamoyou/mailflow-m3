@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../services/materialAppearance.js', async importOriginal => ({ ...(await importOriginal()), saveMaterialAppearance: vi.fn() }));
 vi.mock('../services/db.js', () => ({ query: vi.fn(), pool: {} }));
 vi.mock('../index.js', () => ({
   imapManager: {
+    broadcast: vi.fn(),
     updateSyncIntervalForUser: vi.fn(),
     updateFolderSyncIntervalForUser: vi.fn(),
   },
@@ -35,10 +37,48 @@ vi.mock('../services/rateLimiter.js', () => ({
 }));
 
 import { query } from '../services/db.js';
-import { patchPreferences } from './auth.js';
+import { saveMaterialAppearance } from '../services/materialAppearance.js';
+import { imapManager } from '../index.js';
+import router, { patchPreferences } from './auth.js';
 
 beforeEach(() => {
   query.mockReset().mockResolvedValue({ rows: [] });
+});
+
+describe('category-specific push priorities', () => {
+  it('merges only the submitted priority keys into the authenticated user preferences', async () => {
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    await patchPreferences({ session: { userId: 'user-1' }, body: { pushPriorities: { newsletter: 'normal' }, categorizationEnabled: true } }, res);
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toContain("COALESCE(preferences->'pushPriorities', '{}'::jsonb) || $49::jsonb");
+    expect(params[0]).toBe('user-1');
+    expect(params[26]).toBe(true);
+    expect(params[48]).toBe('{"newsletter":"normal"}');
+    expect(res.json).toHaveBeenCalledWith({ ok: true });
+  });
+  it.each([null, [], {}, { newsletter: 'urgent' }, { category: 'high' }])('rejects invalid priorities %j before any write', async pushPriorities => {
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    await patchPreferences({ session: { userId: 'user-1' }, body: { pushPriorities } }, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(query).not.toHaveBeenCalled();
+  });
+  it('leaves saved priorities alone when updating an unrelated preference', async () => {
+    await patchPreferences({ session: { userId: 'user-1' }, body: { language: 'ko' } }, { status: vi.fn().mockReturnThis(), json: vi.fn() });
+    expect(query.mock.calls[0][1][48]).toBeNull();
+  });
+  it('requires a signed-in session', async () => {
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    await patchPreferences({ session: {}, body: { pushPriorities: { primary: 'high' } } }, res);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(query).not.toHaveBeenCalled();
+  });
+  it('returns normalized high defaults without replacing other saved settings', async () => {
+    query.mockResolvedValueOnce({ rows: [{ preferences: { language: 'ko', pushPriorities: { newsletter: 'low' } } }] }).mockResolvedValueOnce({ rows: [] });
+    const route = router.stack.find(layer => layer.route?.path === '/preferences' && layer.route.methods.get);
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    await route.route.stack.at(-1).handle({ session: { userId: 'user-1' } }, res);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ language: 'ko', materialAppearanceOwnerId: 'user-1', pushPriorities: { primary: 'high', newsletter: 'low', promotion: 'high', automated: 'high', social: 'high' } }));
+  });
 });
 
 describe('PATCH /auth/preferences folderOrder', () => {
@@ -214,6 +254,52 @@ describe('PATCH /auth/preferences darkEmailBodies (#228)', () => {
     await patchPreferences({ session: { userId: 'user-1' }, body: { darkEmailBodies: 'yes' } }, res);
     expect(res.status).toHaveBeenCalledWith(400);
     expect(query).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('Material appearance preference route', () => {
+  const response = () => ({ status: vi.fn().mockReturnThis(), json: vi.fn() });
+  it('requires authentication and refuses a pending write from another owner', async () => {
+    const res = response();
+    await patchPreferences({ session: {}, body: {} }, res);
+    expect(res.status).toHaveBeenCalledWith(401);
+    await patchPreferences({ session: { userId: 'u2' }, body: { materialAppearance: { ownerId: 'u1', device: 'mobile', mode: 'separate' } } }, res);
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(query).not.toHaveBeenCalled();
+  });
+  it('rejects invalid or mixed writes without modifying preferences', async () => {
+    for (const body of [{ materialAppearance: null }, { materialAppearance: { ownerId: 'u1', device: 'mobile', mode: 'shared' }, theme: 'dark' }]) {
+      const res = response();
+      await patchPreferences({ session: { userId: 'u1' }, body }, res);
+      expect(res.status).toHaveBeenCalledWith(400);
+    }
+    expect(query).not.toHaveBeenCalled();
+  });
+  it('returns the saved value and broadcasts only to this user', async () => {
+    const config = { mode: 'shared', revision: 2, shared: { theme: 'dark' } };
+    saveMaterialAppearance.mockResolvedValue(config);
+    const operation = { ownerId: 'u1', device: 'desktop', target: 'shared', changes: { theme: 'dark' } };
+    const res = response();
+    await patchPreferences({ session: { userId: 'u1' }, body: { materialAppearance: operation } }, res);
+    expect(saveMaterialAppearance).toHaveBeenCalledWith('u1', operation);
+    expect(imapManager.broadcast).toHaveBeenCalledWith({ type: 'material_appearance_updated' }, 'u1');
+    expect(res.json).toHaveBeenCalledWith({ ok: true, materialAppearance: config });
+  });
+});
+
+
+describe('Material appearance response ownership', () => {
+  it('returns session ownership separately from stored profile data', async () => {
+    const stored = { materialAppearance: { mode: 'shared' }, materialAppearanceOwnerId: 'forged-old-value', language: 'ko' };
+    query.mockResolvedValueOnce({ rows: [{ preferences: stored }] }).mockResolvedValueOnce({ rows: [] });
+    const res = { json: vi.fn() };
+    const handler = router.stack.find(layer => layer.route?.path === '/preferences' && layer.route.methods.get).route.stack[0].handle;
+    await handler({ session: { userId: 'u1' } }, res);
+    expect(res.json).toHaveBeenCalledWith({ ...stored, materialAppearanceOwnerId: 'u1', pushPriorities: {
+      primary: 'high', newsletter: 'high', promotion: 'high', automated: 'high', social: 'high',
+    } });
+    expect(stored.materialAppearanceOwnerId).toBe('forged-old-value');
   });
 });
 

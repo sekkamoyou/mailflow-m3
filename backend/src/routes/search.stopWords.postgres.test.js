@@ -95,7 +95,9 @@ describe.skipIf(!process.env.MAILFLOW_TEST_DATABASE_URL)('stop-word body search 
 
   it('caps simple-dictionary matching at the same character boundary as English', async () => {
     const condition = freeTextTermCondition(1, 2);
-    for (const [padding, expected] of [[599997, true], [599998, false], [600000, false]]) {
+    // SQL_ASCII counts the UTF-8 fixture bytes as separate characters.
+    const width = Number((await database.query("SELECT length('界') AS width")).rows[0].width);
+    for (const [padding, expected] of [[Math.floor(599997 / width), true], [Math.ceil(599998 / width), false], [Math.ceil(600000 / width), false]]) {
       const result = await database.query(`SELECT ${condition} AS matched FROM
         (SELECT ''::text AS from_name, ''::text AS from_email, ''::text AS subject,
           ''::tsvector AS search_vector, repeat('界', $3::int) || ' we ' AS body_text) m`,

@@ -264,7 +264,7 @@ router.post('/ai/chat', requireAuth, async (req, res) => {
   res.flushHeaders();
 
   try {
-    for await (const delta of streamChat(providerMessages, { signal: controller.signal })) {
+    for await (const delta of streamChat(providerMessages, { signal: controller.signal, userId: req.session.userId })) {
       if (controller.signal.aborted || res.destroyed) break;
       res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: delta } }] })}\n\n`);
     }
