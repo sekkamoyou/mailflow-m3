@@ -64,6 +64,15 @@ describe('POST /categories/ai-classify/:messageId', () => {
     expect(mocks.aiClassifyMessage).toHaveBeenCalledWith('Weekly', 'news@example.com', 'Hi');
   });
 
+  it('refuses when summaries are off, even if compose is on, before accessing mail or using AI', async () => {
+    mocks.getAiStatus.mockResolvedValue({ enabled: true, provider: 'api-key', features: { compose: true, summarize: false } });
+    const response = await classify();
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ code: 'ai_feature_disabled', feature: 'summarize' });
+    expect(mocks.query.mock.calls.map(([sql]) => sql)).toEqual(['SELECT ai_enabled, is_admin FROM users WHERE id = $1']);
+    expect(mocks.aiClassifyMessage).not.toHaveBeenCalled();
+  });
+
   it('refuses a user whose AI access is off, before reading the message or calling the provider', async () => {
     aiEnabled = false;
     const response = await classify();

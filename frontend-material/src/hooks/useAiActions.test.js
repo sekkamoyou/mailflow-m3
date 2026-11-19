@@ -52,20 +52,28 @@ async function runWith(id, body, action, subject) {
   await React.act(async () => root.render(React.createElement(Probe)));
   await React.act(async () => { await hook.run(action); });
   await React.act(async () => root.unmount());
-  return { content: sent.at(-1)[0].content, results: hook.results };
+  const messages = sent.at(-1);
+  return { content: messages[1].content, messages, results: hook.results };
 }
 
 const LONG = 'Synthetic '.repeat(800) + 'TAIL_SENTINEL'; // 8013 chars, far below the limit
 
-test('Summarize sends a long plain-text body whole', async () => {
-  const { content, results } = await runWith('m1', { text: LONG }, BUILTIN_SUMMARIZE);
-  assert.ok(content.endsWith(`\n\n${LONG}`));
+test('Summarize sends a long plain-text body whole, with the task in a separate message', async () => {
+  const { content, messages, results } = await runWith('m1', { text: LONG }, BUILTIN_SUMMARIZE);
+  assert.ok(content.includes(`\n${LONG}\n<<<END `));
+  assert.ok(!content.includes(BUILTIN_SUMMARIZE.prompt));
+  assert.deepEqual(messages.map(m => m.role), ['system', 'user', 'user']);
+  assert.equal(messages[2].content, BUILTIN_SUMMARIZE.prompt);
   assert.equal(results.summarize.truncated, null);
 });
 
-test('a custom action on an HTML-only body sends it whole', async () => {
-  const { content } = await runWith('m2', { html: `<p>${LONG}</p>` }, { id: 'x', label: 'Translate', prompt: 'Translate the complete email.' });
+test('a custom action sends HTML-only mail text separately from the saved instruction', async () => {
+  const prompt = 'Translate the complete email.';
+  const { content, messages } = await runWith('m2', { html: `<p>${LONG}</p>` }, { id: 'x', label: 'Translate', prompt });
   assert.ok(content.includes('TAIL_SENTINEL'));
+  assert.ok(!content.includes(prompt));
+  assert.match(messages[0].content, /untrusted email text/);
+  assert.deepEqual(messages[2], { role: 'user', content: prompt });
 });
 
 // #646: the model reads the visible message. Summarize also loses the trailing quoted

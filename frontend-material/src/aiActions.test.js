@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { AI_ACTION_LIMITS, AI_MESSAGE_MAX_CHARS, SUMMARIZE_PROMPT, buildAiActionContent, summarizePromptForLocale } from './aiActions.js';
+import { AI_ACTION_LIMITS, AI_MESSAGE_MAX_CHARS, SUMMARIZE_PROMPT, buildAiActionMessages, summarizePromptForLocale } from './aiActions.js';
 
 describe('summarizePromptForLocale (#255)', () => {
   it('keeps the base English prompt for English and unknown/empty locales', () => {
@@ -18,54 +18,71 @@ describe('summarizePromptForLocale (#255)', () => {
   });
 });
 
-describe('buildAiActionContent (#633)', () => {
+describe('buildAiActionMessages', () => {
   const prompt = 'Summarize this email.';
 
-  it('sends a long email whole when it fits the backend limit', () => {
+  function emailParts(messages) {
+    const content = messages[1].content;
+    const opening = content.match(/^<<<EMAIL ([a-f0-9]{24})>>>\n/);
+    assert.ok(opening);
+    const closing = `\n<<<END ${opening[1]}>>>`;
+    const end = content.indexOf(closing);
+    assert.ok(end >= opening[0].length);
+    return { token: opening[1], body: content.slice(opening[0].length, end), notice: content.slice(end + closing.length) };
+  }
+
+  it('keeps the task separate from the complete email, with fresh markers', () => {
     const text = 'Synthetic '.repeat(800) + 'TAIL_SENTINEL';
-    const { content, truncated } = buildAiActionContent(prompt, text);
-    assert.equal(content, `${prompt}\n\n${text}`);
+    const { messages, truncated } = buildAiActionMessages(prompt, text);
+    const { body, token, notice } = emailParts(messages);
+    assert.deepEqual(messages.map(m => m.role), ['system', 'user', 'user']);
+    assert.match(messages[0].content, /untrusted email text/);
+    assert.ok(messages[0].content.includes(token));
+    assert.equal(messages[2].content, prompt);
+    assert.equal(body, text);
+    assert.equal(notice, '');
+    assert.equal(truncated, null);
+    assert.notEqual(emailParts(buildAiActionMessages(prompt, text).messages).token, token);
+  });
+
+  it('fills the backend limit exactly, counting both boundary lines', () => {
+    const custom = 'p'.repeat(AI_ACTION_LIMITS.prompt);
+    const overhead = buildAiActionMessages(custom, '').messages[1].content.length;
+    const text = 'x'.repeat(AI_MESSAGE_MAX_CHARS - overhead);
+    const { messages, truncated } = buildAiActionMessages(custom, text);
+    assert.equal(messages[1].content.length, AI_MESSAGE_MAX_CHARS);
+    assert.equal(messages[2].content, custom);
     assert.equal(truncated, null);
   });
 
-  it('fills the limit exactly, counting the prompt and separator', () => {
-    const custom = 'p'.repeat(AI_ACTION_LIMITS.prompt);
-    const text = 'x'.repeat(AI_MESSAGE_MAX_CHARS - custom.length - 2);
-    const { content, truncated } = buildAiActionContent(custom, text);
-    assert.equal(content.length, AI_MESSAGE_MAX_CHARS);
-    assert.equal(truncated, null);
-  });
-
-  it('cuts one character over, stays within the limit and tells the model', () => {
-    const custom = 'p'.repeat(AI_ACTION_LIMITS.prompt);
-    const text = 'x'.repeat(AI_MESSAGE_MAX_CHARS - custom.length - 1);
-    const { content, truncated } = buildAiActionContent(custom, text);
-    assert.ok(content.length <= AI_MESSAGE_MAX_CHARS);
-    assert.equal(truncated.total, text.length);
-    assert.ok(truncated.shown < text.length);
-    assert.match(content, new RegExp(`Only the first ${truncated.shown} of ${text.length} characters of this email are included above`));
+  it('cuts a body one character over and keeps the truncation note outside the quoted mail', () => {
+    const overhead = buildAiActionMessages(prompt, '').messages[1].content.length;
+    const text = 'x'.repeat(AI_MESSAGE_MAX_CHARS - overhead + 1);
+    const { messages, truncated } = buildAiActionMessages(prompt, text);
+    const { body, notice } = emailParts(messages);
+    assert.ok(messages[1].content.length <= AI_MESSAGE_MAX_CHARS);
+    assert.ok(body.length < text.length);
+    assert.deepEqual(truncated, { shown: body.length, total: text.length });
+    assert.ok(notice.includes(`Only the first ${body.length} of ${text.length} characters of this email are included above`));
   });
 
   it('stays within the limit for very long bodies', () => {
     const text = 'word '.repeat(400_000);
-    const { content, truncated } = buildAiActionContent(prompt, text);
-    assert.ok(content.length <= AI_MESSAGE_MAX_CHARS);
-    assert.ok(content.length > AI_MESSAGE_MAX_CHARS - 500, 'uses nearly all of the budget');
+    const { messages, truncated } = buildAiActionMessages(prompt, text);
+    assert.ok(messages[1].content.length <= AI_MESSAGE_MAX_CHARS);
+    assert.ok(messages[1].content.length > AI_MESSAGE_MAX_CHARS - 500, 'uses nearly all of the budget');
     assert.equal(truncated.total, 2_000_000);
   });
 
   it('cuts at a paragraph break near the limit, else a sentence end', () => {
     const para = 'Sentence one. Sentence two.\n\n';
-    const { content } = buildAiActionContent(prompt, para.repeat(2000));
-    assert.match(content, /Sentence two\.\n\n\[Only the first/);
-    const { content: c2 } = buildAiActionContent(prompt, 'Short sentence here. '.repeat(3000));
-    assert.match(c2, /here\.\n\n\[Only the first/);
+    assert.match(emailParts(buildAiActionMessages(prompt, para.repeat(2000)).messages).body, /Sentence two\.$/);
+    assert.match(emailParts(buildAiActionMessages(prompt, 'Short sentence here. '.repeat(3000)).messages).body, /here\.$/);
   });
 
   it('never splits a surrogate pair', () => {
-    const text = '😀'.repeat(20_000); // no boundaries at all, so the cut falls at the budget
-    const { content } = buildAiActionContent(prompt, text);
-    const body = content.slice(prompt.length + 2, content.indexOf('\n\n[Only'));
+    const text = '😀'.repeat(20_000);
+    const { body } = emailParts(buildAiActionMessages(prompt, text).messages);
     assert.equal(body.length % 2, 0);
     assert.equal(body, '😀'.repeat(body.length / 2));
   });

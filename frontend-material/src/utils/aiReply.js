@@ -2,7 +2,7 @@
 // an instruction from the user ("approve the artwork", "decline politely"). This builds what is
 // sent; the request goes through the same /api/ai/chat proxy as the other compose actions.
 
-import { AI_MESSAGE_MAX_CHARS, cutPoint } from '../aiActions.js';
+import { AI_MESSAGE_MAX_CHARS, cutPoint, newEmailBoundary } from '../aiActions.js';
 import { aiMessageText } from './aiMessageText.js';
 
 // How much of the conversation is read. Bodies are fetched one request each, so the count is
@@ -124,18 +124,6 @@ function formatDate(date) {
   return parsed && !Number.isNaN(parsed.getTime()) ? `${parsed.toISOString().slice(0, 16).replace('T', ' ')} UTC` : '';
 }
 
-// The conversation is mail anyone can send, so the lines that frame it (which email is which, who
-// wrote it, which one is answered) carry a token drawn for each request, and the model is told
-// that only lines carrying it are markers. A body cannot hold a token drawn after it was written;
-// one that happens to is passed over for another.
-function newBoundary(texts) {
-  for (;;) {
-    const bytes = crypto.getRandomValues(new Uint8Array(12));
-    const token = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
-    if (!texts.some(text => text.includes(token))) return token;
-  }
-}
-
 // The chat messages for the AI, as { messages, partial }: the instructions, the conversation as
 // material to read, and the user's instruction on its own as the only one to follow. The
 // conversation goes whole when it fits one request (AI_MESSAGE_MAX_CHARS). When it does not, the
@@ -146,7 +134,7 @@ export function buildReplyPrompt({ conversation, leftOut = 0, instruction, subje
   const cleanInstruction = clip((instruction || '').trim(), MAX_INSTRUCTION_CHARS);
   const cleanSubject = clip((subject || '').replace(/[\r\n]+/g, ' ').trim(), MAX_INSTRUCTION_CHARS) || '(none)';
   const count = conversation.length;
-  const token = newBoundary(conversation.map(m => `${m.from}\n${m.text}`));
+  const token = newEmailBoundary(conversation.map(m => `${m.from}\n${m.text}`));
   const intro = (omitted) => (omitted > 0
     ? `Conversation (oldest first; ${omitted} earlier email${omitted === 1 ? '' : 's'} left out):`
     : 'Conversation (oldest first):');

@@ -21,7 +21,10 @@ vi.mock('../middleware/auth.js', () => {
   return { requireAuth: signIn, requireAdmin: signIn };
 });
 vi.mock('../index.js', () => ({ imapManager: imap.manager }));
-vi.mock('../services/aiAccess.js', () => ({ getUserAiAccess: vi.fn(async () => ({ allowed: true })) }));
+vi.mock('../services/aiAccess.js', async (importOriginal) => ({
+  ...await importOriginal(),
+  getUserAiAccess: vi.fn(async () => ({ allowed: true, status: { features: { summarize: true } } })),
+}));
 vi.mock('../services/categorizer.js', () => ({
   invalidateSocialDomainCache: vi.fn(), backfillCategories: vi.fn(async () => {}),
   aiClassifyMessage: vi.fn(async () => 'newsletter'), BUILTIN_SETS: {},

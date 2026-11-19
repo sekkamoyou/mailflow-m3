@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/index.js';
 import { api } from '../utils/api.js';
-import { BUILTIN_SUMMARIZE, buildAiActionContent, summarizePromptForLocale } from '../aiActions.js';
+import { BUILTIN_SUMMARIZE, buildAiActionMessages, summarizePromptForLocale } from '../aiActions.js';
 import { getResults, saveResult, removeResult } from '../aiResults.js';
 import { aiMessageText } from '../utils/aiMessageText.js';
 import { aiRuns } from '../utils/aiRunRegistry.js';
@@ -77,9 +77,9 @@ export function useAiActions(messageId, body, subject) {
     // language (#255). Custom actions keep their author's prompt as-is.
     const promptText = action.builtin ? summarizePromptForLocale(i18n.language) : action.prompt;
     // A body too long for one request is cut, and the box says so (#633).
-    const { content, truncated } = buildAiActionContent(promptText, textContent);
     try {
-      const fullText = await api.ai.chat([{ role: 'user', content }], {
+      const { messages, truncated } = buildAiActionMessages(promptText, textContent);
+      const fullText = await api.ai.chat(messages, {
         purpose: 'summarize',
         signal: ctrl.signal,
         onDelta: (text) => {

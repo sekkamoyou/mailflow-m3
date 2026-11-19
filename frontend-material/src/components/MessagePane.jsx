@@ -1290,7 +1290,10 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
     { key: 'print', label: t('message.print'), title: withShortcut(t('message.print'), 'printMessage'), icon: <PrintIcon />, onClick: handlePrint },
     darkToggleShown && { key: 'dark', label: darkToggleLabel, icon: <DarkToggleIcon shownDark={shownDark} />, onClick: toggleDark, pressed: shownDark, disabled: darkRefused },
   ].filter(Boolean) : [];
-  const aiTools = aiStatus?.enabled && aiStatus?.features?.summarize && body ? {
+  const aiSummariesEnabled = aiStatus?.enabled && aiStatus?.features?.summarize;
+  const canAiClassify = aiSummariesEnabled && message && !message.category
+    && (categorizationEnabled || accounts.find(a => a.id === message.account_id)?.categorization_enabled);
+  const aiTools = aiSummariesEnabled && body ? {
     items: [{ ...BUILTIN_SUMMARIZE, label: t('message.summarize') }, ...(aiActions || [])],
     results: aiResults,
     onRun: action => runAiAction(action),
@@ -1624,7 +1627,7 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
           )}
 
           {/* AI classify banner — shown for messages with no category signal when AI is available */}
-          {!message.category && (categorizationEnabled || accounts.find(a => a.id === message.account_id)?.categorization_enabled) && aiStatus?.enabled && (
+          {canAiClassify && (
             <div className="msg-notice" style={{
               marginBottom: 10, padding: '9px 14px',
               background: 'var(--bg-secondary)',
@@ -1712,7 +1715,7 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
           {message.list_unsubscribe && !message.unsubscribed_at && unsubscribeStatus !== 'done' && (
             <UnsubscribeNotice status={unsubscribeStatus} onUnsubscribe={handleUnsubscribe} />
           )}
-          {!message.category && (categorizationEnabled || accounts.find(a => a.id === message.account_id)?.categorization_enabled) && aiStatus?.enabled && (
+          {canAiClassify && (
             <div className="msg-notice" style={{
               marginBottom: 10, padding: '9px 14px',
               background: 'var(--bg-secondary)', border: '1px solid var(--border)',

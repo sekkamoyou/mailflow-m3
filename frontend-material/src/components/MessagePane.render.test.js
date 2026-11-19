@@ -703,6 +703,27 @@ describe('message body rendering', () => {
     await React.act(async () => { await new Promise(r => setTimeout(r, 30)); });
   };
 
+  test('AI classification is shown only when summaries are enabled', async () => {
+    const status = api.ai.status;
+    const { categorizationEnabled } = useStore.getState();
+    try {
+      for (const summarize of [true, false]) {
+        api.ai.status = async () => ({ enabled: true, features: { summarize } });
+        await React.act(async () => {
+          useStore.setState({ categorizationEnabled: true, selectedMessageId: 't1' });
+          root.render(React.createElement(MessagePane, { key: String(summarize) }));
+        });
+        assert.equal(document.getElementById('root').textContent.includes('message.aiClassify.button'), summarize);
+      }
+    } finally {
+      api.ai.status = status;
+      await React.act(async () => {
+        useStore.setState({ categorizationEnabled });
+        root.render(React.createElement(MessagePane));
+      });
+    }
+  });
+
   test('an HTML body renders into an iframe', async () => {
     await open('h1');
     const frame = document.querySelector('iframe');
