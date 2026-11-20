@@ -1,6 +1,6 @@
 # MailFlow M3
 
-MailFlow M3 is a self-hosted webmail client with a Material 3 interface and a companion backend. It is an independently maintained fork of [MailFlow v4.4.0 by Matthias and contributors](https://github.com/maathimself/mailflow/releases/tag/v4.4.0) (`1db523a`).
+MailFlow M3 is a self-hosted webmail client with a Material 3 interface and a companion backend. It is an independently maintained fork of [MailFlow v4.5.1 by Matthias and contributors](https://github.com/maathimself/mailflow/releases/tag/v4.5.1) (`3c6b67e`).
 
 [Run MailFlow M3](#run-mailflow-m3) · [Versions and build information](#versions-and-build-information) · [License and third-party notices](#license-and-third-party-notices) · [Upstream MailFlow reference](#upstream-mailflow-reference)
 
@@ -31,7 +31,7 @@ The screenshots use sample mailboxes. Select an image to open it at full size.
 - **Web interface** — Material 3 navigation, controls, and dialogs for desktop and mobile, with refined Korean UI text.
 - **Appearance** — synchronize preferences between devices or keep separate desktop and mobile settings. Administrators can customize instance branding.
 - **Messages and notifications** — message-list previews and metadata, notification avatars, configurable push priority by mail category, and dismissal of an individual PWA notification after its message is marked read.
-- **Backend compatibility** — OpenCode Go support, Yahoo Japan IMAP provider detection, NAVER empty-folder handling, and fixes for reconciling messages deleted in other mail clients. The fork uses the upstream v4.4.0 database migrations.
+- **Backend compatibility** — OpenCode Go support, Yahoo Japan IMAP provider detection, NAVER empty-folder handling, and fixes for reconciling messages deleted in other mail clients. The fork uses the upstream v4.5.1 database migrations.
 
 ## Run MailFlow M3
 
@@ -61,7 +61,7 @@ Point a same-host HTTPS reverse proxy to `http://127.0.0.1:8084`. Forward the pu
 
 ### Native install
 
-Use the [upstream v4.4.0 native setup](https://github.com/maathimself/mailflow/blob/v4.4.0/README.md#option-c--native-install-no-docker) for system dependencies, PostgreSQL, and backend environment settings. Use the M3 checkout above and build the web frontend with the Node.js version listed in the [frontend build guide](frontend-material/README.md#build-and-run):
+Use the [upstream v4.5.1 native setup](https://github.com/maathimself/mailflow/blob/v4.5.1/README.md#option-c--native-install-no-docker) for system dependencies, PostgreSQL, and backend environment settings. Use the M3 checkout above and build the web frontend with the Node.js version listed in the [frontend build guide](frontend-material/README.md#build-and-run):
 
 ```sh
 (cd frontend-material && npm ci && VITE_BUILD_SHA="$GIT_SHA" npm run build)
@@ -75,7 +75,7 @@ Serve `frontend-material/dist/` with a reverse proxy and follow the [frontend gu
 ## Versions and build information
 
 - **Frontend** — [`v0.1`](https://github.com/sekkamoyou/mailflow-m3/tree/v0.1) is the initial frontend tag. The frontend package version shown in **Settings → About** is `0.1.0`.
-- **Backend** — **Settings → About** displays the upstream API version with the fork suffix, for example `v4.4.0-m3`. The backend build is the first seven characters of the SHA reported by `/api/version`. The frontend build is derived from `VITE_BUILD_SHA`.
+- **Backend** — **Settings → About** displays the upstream API version with the fork suffix, for example `v4.5.1-m3`. The backend build is the first seven characters of the SHA reported by `/api/version`. The frontend build is derived from `VITE_BUILD_SHA`.
 - **Source links** — **Settings → About** uses the two source URLs set at frontend build time. Point each URL to the exact deployed revision and refresh the relevant link when a deployment changes it.
 
 ## License and third-party notices
@@ -261,6 +261,8 @@ MailFlow will be available on port 443 (HTTPS, self-signed certificate) and port
 
 **Optional — behind your own reverse proxy:** point your proxy at port 80. Set `APP_HTTP_PORT` in `.env` if you need a different host port. Your proxy should forward `X-Forwarded-Proto: https` so that session cookies are marked Secure correctly. To stop MailFlow serving HTTPS on port 443 and generating a certificate, set `TLS_MODE=off` in `.env`.
 
+**Optional — stay signed in longer:** a sign-in lasts 7 days without use, and each visit starts the count again. Each user can pick 7 to 90 days under Settings → Security. Set `SESSION_IDLE_DAYS` in `.env` (1 to 365) to change the default for users who haven't picked, then run `docker compose up -d` again. If your `docker-compose.yml` has no `SESSION_IDLE_DAYS` line, download it again with the first command in step 1, or the setting never reaches the backend.
+
 If clients can reach MailFlow only through your proxy, also set `TRUST_PROXY_HOPS=2` in `.env`, so the login rate limit sees each client's address rather than the proxy's. Docker publishes `APP_PORT` and `APP_HTTP_PORT` on every interface, and firewalls such as ufw do not filter them, so first bind both to an address only your proxy can reach, for example `APP_HTTP_PORT=127.0.0.1:8080` and `APP_PORT=127.0.0.1:8443` for a proxy on the same host. Without that, leave `TRUST_PROXY_HOPS` unset: a client that connects directly could choose the address it is rate-limited and logged under. If your `docker-compose.yml` has no `TRUST_PROXY_HOPS` line, download it again with the first command in step 1, or the setting never reaches the backend.
 
 ### 4. Create your admin account
@@ -412,7 +414,11 @@ Edit `.env`. In addition to the required secrets, set these for a native install
 | `DB_NAME` | `mailflow` |
 | `DB_USER` | `mailflow` |
 | `DB_PASSWORD` | password you set in step 2 |
+| `DATABASE_URL` | optional, e.g. `postgres://mailflow:password@localhost:5432/mailflow` |
 | `ENCRYPTION_KEY` | `openssl rand -hex 32` |
+| `SESSION_IDLE_DAYS` | optional, days a sign-in lasts without use, 1 to 365 (default `7`); users can pick 7 to 90 days in Settings |
+
+When `DATABASE_URL` is set, the backend connects with it alone and ignores `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` and `DB_PASSWORD`. Connection parameters in the URL, such as `sslmode`, apply as written. The bundled `postgres` service in Docker Compose still takes its password from `DB_PASSWORD`.
 
 For Docker installs, the bundled Postgres works out of the box. To point at an **external** database server (any host/port), or to store data on a host **bind mount** (e.g. an Unraid appdata share with `PUID`/`PGID`), see the "Database" and "Storage & permissions" sections of [`.env.example`](.env.example).
 
@@ -783,12 +789,11 @@ MailFlow is free and open source, and built and maintained by one person. Sponso
 <!-- SPONSORS-START -->
 #### Sponsors
 
-<a href="https://github.com/phillip9933" title="phillip9933"><img src="https://avatars.githubusercontent.com/u/19641186?s=192&amp;u=f5eed97c62db0fed8c5274adcf7fd750e42bcd93&amp;v=4" width="48" height="48" alt="phillip9933" style="border-radius:50%;margin:4px"></a>
 <a href="https://github.com/Samuarcher" title="Samuarcher"><img src="https://avatars.githubusercontent.com/u/3508826?s=192&amp;u=b51d075a84fc497706806bb220253de08683bf1c&amp;v=4" width="48" height="48" alt="Samuarcher" style="border-radius:50%;margin:4px"></a>
 
 #### Past supporters
 
-<sub><a href="https://github.com/Rainson12">Rene Steen</a>, <a href="https://github.com/rahhing">rahh</a>, <a href="https://github.com/MikeScanlan5">Mike Scanlan</a>, <a href="https://github.com/lindstrm">Joachim Lindström</a>, <a href="https://github.com/shamoon">shamoon</a>, <a href="https://github.com/chip-well">Christopher Hipwell</a></sub>
+<sub><a href="https://github.com/Rainson12">Rene Steen</a>, <a href="https://github.com/rahhing">rahh</a>, <a href="https://github.com/MikeScanlan5">Mike Scanlan</a>, <a href="https://github.com/lindstrm">Joachim Lindström</a>, <a href="https://github.com/shamoon">shamoon</a>, <a href="https://github.com/chip-well">Christopher Hipwell</a>, <a href="https://github.com/phillip9933">phillip9933</a></sub>
 <!-- SPONSORS-END -->
 
 ---
