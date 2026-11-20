@@ -1,3 +1,5 @@
+import WebhookSettings, { AdminWebhookSettings } from './WebhookSettings.jsx';
+import TagsSettings from '../tags/TagsSettings.jsx';
 import AppearanceSyncSettings from './AppearanceSyncSettings.jsx';
 import PushPrioritiesSection from './PushPrioritiesSection.jsx';
 import SourceNotice from './SourceNotice.jsx';
@@ -39,7 +41,7 @@ import { usePushNotifications } from '../hooks/usePushNotifications.js';
 import SignatureEditor from './SignatureEditor.jsx';
 import DiagnosticsReportModal from './DiagnosticsReportModal.jsx';
 import { getEffectiveShortcuts, getGroupedActions, getShortcutConflicts, shortcutActionText, shortcutBindingFromEvent, SPECIAL_KEY_LABELS, parseModKey, modLabel } from '../utils/defaultShortcuts.js';
-import { isValidForwardAddress } from '../utils/ruleActions.js';
+import { isValidForwardAddress, labelNameErrorKey, MAX_LABEL_NAME_LENGTH } from '../utils/ruleActions.js';
 import { folderParentLabel } from '../utils/folderDisplay.js';
 import AdminUserEditor from './AdminUserEditor.jsx';
 import AccountErrorCallout from './AccountErrorCallout.jsx';
@@ -4256,6 +4258,7 @@ function CategoriesSection({ initialSubTab }) {
       {/* Plugins that contribute settings under the Categories tab (currently GTD). Rendered only
           while the plugin is activated; core knows nothing plugin-specific here. */}
       <PluginSlot name="settings-categories" ctx={{ initialSubTab }} />
+      <TagsSettings />
     </div>
   );
 }
@@ -5281,6 +5284,7 @@ function NotificationsTab() {
       {/* Push Notifications */}
       <PushNotificationsSection />
       <PushPrioritiesSection />
+      <WebhookSettings />
     </div>
   );
 }
@@ -5379,7 +5383,7 @@ const LANGUAGES = [
 
 function LanguageTab() {
   const { t } = useTranslation();
-  const { language, setLanguage } = useStore();
+  const { language, setLanguage, timeFormat, setTimeFormat } = useStore();
 
   return (
     <div>
@@ -5419,6 +5423,16 @@ function LanguageTab() {
             </MaterialButton>
           );
         })}
+      </div>
+      <div style={{ marginTop: 24 }}>
+        <label htmlFor="settings-time-format" className="md-field-label">{t('admin.appearance.timeFormat')}</label>
+        <MaterialSelect id="settings-time-format" value={timeFormat} aria-describedby="settings-time-format-description"
+          onChange={event => setTimeFormat(event.target.value)}>
+          <option value="auto">{t('admin.appearance.timeFormatAuto')}</option>
+          <option value="12">{t('admin.appearance.timeFormat12')}</option>
+          <option value="24">{t('admin.appearance.timeFormat24')}</option>
+        </MaterialSelect>
+        <p className="md-supporting-text" id="settings-time-format-description">{t('admin.appearance.timeFormatDesc')}</p>
       </div>
     </div>
   );
@@ -5506,7 +5520,7 @@ function SecurityPrivacyTab({ initialSubTab }) {
   const { t } = useTranslation();
   return (
     <SubTabs initialTab={initialSubTab} tabs={[
-      { id: 'security', label: t('admin.tabs.security'), content: <SecurityTab /> },
+      { id: 'security', label: t('admin.tabs.security'), content: <><SessionLengthSection /><SecurityTab /></> },
       { id: 'privacy',  label: t('admin.tabs.privacy'),  content: <PrivacyTab /> },
     ]} />
   );
@@ -5786,6 +5800,12 @@ function RulesTab() {
       setFormError(t('admin.rules.errorForwardEmail'));
       return;
     }
+    const labelAction = actions.find(action => action.type === 'apply_label');
+    const labelError = labelAction && labelNameErrorKey(labelAction.value);
+    if (labelError) {
+      setFormError(t(labelError));
+      return;
+    }
     setFormSaving(true);
     setFormError('');
     try {
@@ -5882,11 +5902,12 @@ function RulesTab() {
   function actionSummary(rule) {
     const acts = Array.isArray(rule.actions) ? rule.actions : [];
     if (!acts.length) return '—';
-    const labels = { mark_read: t('admin.rules.actionMarkRead'), star: t('admin.rules.actionStar'), forward: t('admin.rules.actionForward'), archive: t('admin.rules.actionArchive'), delete: t('admin.rules.actionDelete'), move: t('admin.rules.actionMove'), set_category: t('admin.rules.actionSetCategory'), notify: t('admin.rules.actionNotify') };
+    const labels = { mark_read: t('admin.rules.actionMarkRead'), star: t('admin.rules.actionStar'), forward: t('admin.rules.actionForward'), archive: t('admin.rules.actionArchive'), delete: t('admin.rules.actionDelete'), move: t('admin.rules.actionMove'), set_category: t('admin.rules.actionSetCategory'), notify: t('admin.rules.actionNotify'), apply_label: t('admin.rules.actionApplyLabel') };
     // Show the move destination and the category so same-named rules are tellable apart at a glance.
     return acts.map(a => {
       if (a.type === 'move' && a.value) return `${labels.move} → ${a.value}`;
       if (a.type === 'set_category' && a.value) return `${labels.set_category} → ${t(`messageList.categories.${a.value}`)}`;
+      if (a.type === 'apply_label' && a.value) return `${labels.apply_label} → ${a.value}`;
       return labels[a.type] || a.type;
     }).join(', ');
   }
@@ -5917,6 +5938,7 @@ function RulesTab() {
     { type: 'delete',    label: t('admin.rules.actionDelete') },
     { type: 'move',      label: t('admin.rules.actionMove') },
     { type: 'set_category', label: t('admin.rules.actionSetCategory') },
+    { type: 'apply_label', label: t('admin.rules.actionApplyLabel') },
     { type: 'notify',    label: t('admin.rules.actionNotify') },
   ];
 
@@ -6144,6 +6166,13 @@ function RulesTab() {
                     ))}
                   </MaterialSelect>
                 )}
+                {type === 'apply_label' && checked && <div style={{ marginTop: 6, marginInlineStart: 22 }}>
+                  <MaterialInput aria-label={t('admin.rules.actionApplyLabel')} maxLength={MAX_LABEL_NAME_LENGTH}
+                    value={fd.actions.find(action => action.type === 'apply_label')?.value || ''}
+                    onChange={event => setActionValue('apply_label', event.target.value)}
+                    placeholder={t('admin.rules.actionApplyLabelPlaceholder')} />
+                  <p className="md-supporting-text">{t('admin.rules.actionApplyLabelHint')}</p>
+                </div>}
                 {type === 'forward' && checked && (
                   <MaterialInput
                     type="email"
@@ -6671,7 +6700,7 @@ const TAB_GROUPS = [
   { id: 'mail', labelKey: 'admin.tabs.groupMail', tabIds: ['accounts', 'rules', 'categories', 'antispam', 'cleanup'] },
   { id: 'preferences', labelKey: 'admin.tabs.groupPreferences', tabIds: ['appearance', 'behavior', 'notifications', 'shortcuts', 'security'] },
   { id: 'ai-extensions', labelKey: 'admin.tabs.groupAiExtensions', tabIds: ['ai-actions', 'ai', 'integrations', 'plugins'] },
-  { id: 'admin', labelKey: 'admin.tabs.groupAdmin', tabIds: ['users', 'sso', 'mail-signin', 'backup'] },
+  { id: 'admin', labelKey: 'admin.tabs.groupAdmin', tabIds: ['users', 'sso', 'mail-signin', 'webhooks', 'backup'] },
 ];
 
 const TABS = [
@@ -6751,6 +6780,10 @@ const TABS = [
     id: 'mail-signin', labelKey: 'admin.tabs.mailSignIn',
     adminOnly: true,
     icon: <MaterialIcon name="schedule_send" />,
+  },
+  {
+    id: 'webhooks', labelKey: 'webhooks.title', adminOnly: true,
+    icon: <MaterialIcon name="notifications" />,
   },
   {
     id: 'backup', labelKey: 'admin.tabs.backup',
@@ -7287,6 +7320,29 @@ function ScreenLockSection() {
       </div>
     </div>
   );
+}
+
+function SessionLengthSection() {
+  const { t } = useTranslation();
+  const id = useId();
+  const { sessionDays, sessionDaysDefault, setSessionDays } = useStore();
+  const [status, setStatus] = useState('');
+  async function choose(days) {
+    setStatus('saving');
+    try { await setSessionDays(days); setStatus('saved'); }
+    catch { setStatus('failed'); }
+  }
+  return <section style={{ marginBottom: 28 }}>
+    <label className="md-field-label" htmlFor={id}>{t('admin.session.title')}</label>
+    <MaterialSelect id={id} value={sessionDays} disabled={status === 'saving'} aria-describedby={id + '-help'}
+      onChange={event => choose(Number(event.target.value))}>
+      <option value={0}>{t('admin.session.default', { count: sessionDaysDefault })}</option>
+      {[7, 14, 30, 60, 90].map(days => <option key={days} value={days}>{t('admin.session.days', { count: days })}</option>)}
+    </MaterialSelect>
+    <p className="md-supporting-text" id={id + '-help'}>{t('admin.session.description')}</p>
+    {status === 'saved' && <p role="status">{t('admin.session.saved')}</p>}
+    {status === 'failed' && <p role="alert" style={{ color: 'var(--md-sys-color-error)' }}>{t('admin.session.failed')}</p>}
+  </section>;
 }
 
 function SecurityTab() {
@@ -8454,6 +8510,8 @@ function makeSearchIndex(t) {
     { label: t('admin.messageList.defaultSender'), keywords: ['from', 'sender', 'default sender', 'send from', 'alias', 'identity'], tab: 'behavior', breadcrumb: behaviorCrumb },
     { label: t('admin.messageList.defaultMailApp'), keywords: ['mailto', 'default app', 'default email', 'protocol handler', 'links'], tab: 'behavior', breadcrumb: behaviorCrumb },
     // Appearance > Fonts & Language
+    { label: t('admin.appearance.timeFormat'), keywords: ['time format', 'clock', '12-hour', '24-hour', '시간 형식'], tab: 'appearance', subtab: 'fonts', breadcrumb: fontsCrumb },
+    { label: t('admin.session.title'), keywords: ['session', 'sign-in length', '로그인 유지'], tab: 'security', subtab: 'security', breadcrumb: tabLabel('security') },
     { label: t('admin.appearance.language'), keywords: ['language', 'locale', 'french', 'english', 'spanish', 'german', 'deutsch', 'russian', 'chinese', 'italian', 'czech', 'čeština', 'portuguese', 'português', 'brasil', 'korean', '한국어', 'français', 'español'], tab: 'appearance', subtab: 'fonts', breadcrumb: fontsCrumb },
     { label: t('admin.appearance.fontSize'), keywords: ['font size', 'text size', 'zoom', 'scale', 'accessibility', 'larger text'], tab: 'appearance', subtab: 'fonts', breadcrumb: fontsCrumb },
     { label: t('admin.appearance.typography'), keywords: ['font', 'typography', 'typeface', 'serif', 'sans', 'monospace', 'reading font'], tab: 'appearance', subtab: 'fonts', breadcrumb: fontsCrumb },
@@ -8480,6 +8538,8 @@ function makeSearchIndex(t) {
     { label: t('admin.notifications.appBadge'), keywords: ['badge', 'app icon', 'pwa', 'unread count', 'icon badge'], tab: 'notifications', breadcrumb: tabLabel('notifications') },
     { label: t('admin.notifications.faviconBadge'), keywords: ['favicon', 'tab badge', 'browser tab', 'tab icon', 'unread dot'], tab: 'notifications', breadcrumb: tabLabel('notifications') },
     { label: t('admin.push.title'), keywords: ['push', 'notification', 'browser notification', 'desktop notification', 'permission'], tab: 'notifications', breadcrumb: tabLabel('notifications') },
+    { label: t('webhooks.title'), keywords: ['webhook', 'ntfy', 'gotify', '웹훅'], tab: 'notifications', breadcrumb: tabLabel('notifications') },
+    { label: t('tags.title'), keywords: ['tag', 'tags', '태그'], tab: 'categories', breadcrumb: tabLabel('categories') },
     { label: t('admin.pushPriorities.title'), keywords: ['push', 'priority', 'category', 'delivery', '푸시', '우선순위'], tab: 'notifications', breadcrumb: tabLabel('notifications') },
     // Shortcuts (desktop only)
     { label: tabLabel('shortcuts'), keywords: ['shortcut', 'keyboard', 'hotkey', 'keybind', 'key binding', 'compose shortcut', 'reply shortcut'], tab: 'shortcuts', mobileHidden: true, breadcrumb: tabLabel('shortcuts') },
@@ -8621,6 +8681,7 @@ export default function AdminPanel() {
       {adminTab === 'mail-signin' && user?.isAdmin && <MailSignInTab />}
       {adminTab === 'users' && <UsersTab />}
       {adminTab === 'sso' && <SSOTab />}
+      {adminTab === 'webhooks' && user?.isAdmin && <AdminWebhookSettings />}
       {adminTab === 'backup' && <BackupSettings />}
       {adminTab === 'security' && <SecurityPrivacyTab key={user?.id ?? 'anonymous'} initialSubTab={pendingSubTab} />}
       {adminTab === 'behavior' && <BehaviorTab />}

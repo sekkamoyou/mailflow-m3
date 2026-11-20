@@ -1,3 +1,6 @@
+import { PluginSlot } from '../plugins/PluginSlot.jsx';
+import { closeHistory } from '@tiptap/pm/history';
+import { DOMSerializer } from '@tiptap/pm/model';
 import { MaterialProgress } from '../material/controls.jsx';
 import MaterialDialog from '../material/MaterialDialog.jsx';
 import { useModalFocus } from '../material/useModalFocus.js';
@@ -52,7 +55,7 @@ import { ComposeQuestion, ScheduledStrip, SendLaterIcon, SendLaterMenu, SendLate
 
 // Resize an image blob/file to max maxW pixels wide, preserving aspect ratio.
 // Returns a Promise<string> of a base64 data URL.
-function resizeImageToDataUrl(file, maxW = 800) {
+export function resizeImageToDataUrl(file, maxW = 800) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new window.Image();
@@ -214,6 +217,62 @@ function resolveFrom(val) {
     return { aliasId: parts[1], accountId: parts[2] };
   }
   return { accountId: val.replace('account:', ''), aliasId: null };
+}
+
+export function createComposeExtensions(placeholder) {
+  return [
+    // Link comes from ComposerLink instead of StarterKit's bundled copy so the mark can
+    // be made non-inclusive. See editorLink.js for why (#415).
+    StarterKit.configure({
+      link: false,
+    }),
+    ComposerLink,
+    TextStyle,
+    TiptapColor,
+    FontFamily,
+    BackgroundColor,
+    FontSize,
+    PasteWithoutPageColors,
+    TextAlign.configure({ types: ['heading', 'paragraph'] }),
+    ResizableImage.configure({ inline: true, allowBase64: true }),
+    Table.configure({ resizable: false }),
+    TableRow,
+    TableHeader,
+    TableCell,
+    Placeholder.configure({ placeholder: placeholder }),
+  ];
+}
+
+export function createComposeEditorProps(placeholder) {
+  return {
+    attributes: { spellcheck: 'true', 'aria-label': placeholder },
+    // A file dropped on the body is attached by the composer's drop handler, not inserted here.
+    // Asked of the files, not the types: Chrome lists Files for another site's image without
+    // handing the file over, and that image still goes in as before.
+    handleDrop(view, event) {
+      return (event.dataTransfer?.files?.length ?? 0) > 0;
+    },
+    handlePaste(view, event) {
+      // If clipboard has HTML containing a table (e.g. from Excel), let
+      // TipTap parse it natively — Excel provides both image/png and text/html;
+      // without this check the image path wins and the table is lost.
+      const html = event.clipboardData?.getData('text/html') ?? '';
+      if (html && /<table[\s>]/i.test(html)) return false;
+      const items = Array.from(event.clipboardData?.items || []);
+      const imageItem = items.find(it => it.type.startsWith('image/'));
+      if (!imageItem) return false;
+      event.preventDefault();
+      const file = imageItem.getAsFile();
+      if (file) {
+        resizeImageToDataUrl(file).then(dataUrl => {
+          view.dispatch(view.state.tr.replaceSelectionWith(
+            view.state.schema.nodes.image.create({ src: dataUrl })
+          ));
+        }).catch(() => {});
+      }
+      return true;
+    },
+  };
 }
 
 export default function ComposeModal() {
@@ -410,6 +469,7 @@ export default function ComposeModal() {
   const idempotencyKeyRef = useRef(null);
   const replyTypeRef = useRef(null);
   const textareaRef = useRef(null);
+  const sourceTextareaRef = useRef(null);
   const fileInputRef = useRef(null);
   const imageInputRef = useRef(null);
   const signatureRef = useRef(null);
@@ -468,27 +528,7 @@ export default function ComposeModal() {
   const [discarding, setDiscarding] = useState(false);
 
   const editor = useEditor({
-    extensions: [
-      // Link comes from ComposerLink instead of StarterKit's bundled copy so the mark can
-      // be made non-inclusive. See editorLink.js for why (#415).
-      StarterKit.configure({
-        link: false,
-      }),
-      ComposerLink,
-      TextStyle,
-      TiptapColor,
-      FontFamily,
-      BackgroundColor,
-      FontSize,
-      PasteWithoutPageColors,
-      TextAlign.configure({ types: ['heading', 'paragraph'] }),
-      ResizableImage.configure({ inline: true, allowBase64: true }),
-      Table.configure({ resizable: false }),
-      TableRow,
-      TableHeader,
-      TableCell,
-      Placeholder.configure({ placeholder: t('compose.bodyPh') }),
-    ],
+    extensions: createComposeExtensions(t('compose.bodyPh')),
     content: composeData?.body || '',
     // TipTap rewrites the HTML it loads, so a draft saved by another client never equals its
     // own source. Baseline on what the editor holds, or merely opening a draft counts as an
@@ -502,35 +542,7 @@ export default function ComposeModal() {
     // Not when the AI panel opens with the composer: its instruction field takes the focus.
     autofocus: initialFocus === 'editor' && !plaintextEmail && !composeData?.aiReply ? 'start' : false,
     immediatelyRender: false,
-    editorProps: {
-      attributes: { spellcheck: 'true', 'aria-label': t('compose.bodyPh') },
-      // A file dropped on the body is attached by the composer's drop handler, not inserted here.
-      // Asked of the files, not the types: Chrome lists Files for another site's image without
-      // handing the file over, and that image still goes in as before.
-      handleDrop(view, event) {
-        return (event.dataTransfer?.files?.length ?? 0) > 0;
-      },
-      handlePaste(view, event) {
-        // If clipboard has HTML containing a table (e.g. from Excel), let
-        // TipTap parse it natively — Excel provides both image/png and text/html;
-        // without this check the image path wins and the table is lost.
-        const html = event.clipboardData?.getData('text/html') ?? '';
-        if (html && /<table[\s>]/i.test(html)) return false;
-        const items = Array.from(event.clipboardData?.items || []);
-        const imageItem = items.find(it => it.type.startsWith('image/'));
-        if (!imageItem) return false;
-        event.preventDefault();
-        const file = imageItem.getAsFile();
-        if (file) {
-          resizeImageToDataUrl(file).then(dataUrl => {
-            view.dispatch(view.state.tr.replaceSelectionWith(
-              view.state.schema.nodes.image.create({ src: dataUrl })
-            ));
-          }).catch(() => {});
-        }
-        return true;
-      },
-    },
+    editorProps: createComposeEditorProps(t('compose.bodyPh')),
   });
 
   useEffect(() => {
@@ -2092,6 +2104,89 @@ export default function ComposeModal() {
     </MaterialButton>
   ) : null);
 
+  const composerPluginContext = {
+    editor, sessionId: composeSession, disabled: sending || (!!scheduledEdit && !holdReady), htmlMode, plaintextEmail, isMobile,
+    captureSelection: () => {
+      const target = plaintextEmail ? textareaRef.current : htmlMode ? sourceTextareaRef.current : null;
+      return target ? { mode: plaintextEmail ? 'plain' : 'source', value: target.value, from: target.selectionStart, to: target.selectionEnd }
+        : { mode: 'rich', bookmark: editor?.state.selection.getBookmark() };
+    },
+    getRecipients: ({ committedOnly = false } = {}) => committedOnly ? toChips : [...toChips, ...parseChips(toInput)],
+    getSubject: () => subject,
+    getBody: () => plaintextEmail ? body : htmlMode ? htmlSource : editor?.getHTML() || '',
+    transformContent: ({ text, html, subject: transformSubject }) => {
+      if (sending || (scheduledEdit && !holdReady) || useStore.getState().composeSession !== composeSession || useStore.getState().user?.id !== composeOwner) return;
+      let changed = false;
+      if (plaintextEmail) {
+        const next = text(body);
+        if (next !== body) { setBody(next); changed = true; }
+      } else if (htmlMode) {
+        const next = html(htmlSource);
+        if (next !== htmlSource) { setHtmlSource(next); changed = true; }
+      } else if (editor && !editor.isDestroyed) {
+        const replacements = [];
+        editor.state.doc.descendants((node, pos) => {
+          if (!node.isText) return;
+          const next = text(node.text);
+          if (next !== node.text) replacements.push({ pos, size: node.nodeSize, next });
+        });
+        if (replacements.length) {
+          const tr = closeHistory(editor.state.tr);
+          // Replace from the end so positions and the user's selection keep mapping correctly.
+          replacements.reverse().forEach(({ pos, size, next }) => tr.insertText(next, pos, pos + size));
+          editor.view.dispatch(tr);
+          changed = true;
+        }
+      }
+      const nextSubject = transformSubject(subject);
+      if (nextSubject !== subject) { setSubject(nextSubject); changed = true; }
+      if (changed) { bodyEditedRef.current = true; lastEditAtRef.current = Date.now(); }
+    },
+    getContent: (selection) => {
+      const container = document.createElement('div');
+      if (plaintextEmail || htmlMode) {
+        const value = plaintextEmail ? body : htmlSource;
+        const text = selection?.from !== selection?.to ? value.slice(selection.from, selection.to) : value;
+        if (htmlMode) return DOMPurify.sanitize(text);
+        container.textContent = text;
+        return container.innerHTML.replace(/\n/g, '<br>');
+      }
+      if (!editor || editor.isDestroyed) return '';
+      const { from, to } = editor.state.selection;
+      if (from === to) return editor.getHTML();
+      container.appendChild(DOMSerializer.fromSchema(editor.schema).serializeFragment(editor.state.doc.slice(from, to).content));
+      return container.innerHTML;
+    },
+    insertContent: (htmlContent, selection, { subject: insertedSubject = '' } = {}) => {
+      if (sending || (scheduledEdit && !holdReady) || useStore.getState().composeSession !== composeSession || useStore.getState().user?.id !== composeOwner) return;
+      const html = DOMPurify.sanitize(htmlContent || '');
+      const insertText = (value, text, mode) => {
+        const from = selection?.mode === mode && selection.value === value ? selection.from : value.length;
+        const to = selection?.mode === mode && selection.value === value ? selection.to : value.length;
+        return value.slice(0, from) + text + value.slice(to);
+      };
+      if (plaintextEmail) {
+        const element = document.createElement('div');
+        element.innerHTML = html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n');
+        setBody(value => insertText(value, element.textContent.replace(/\n$/, ''), 'plain'));
+      } else if (htmlMode) setHtmlSource(value => insertText(value, html, 'source'));
+      else {
+        if (!editor || editor.isDestroyed) return;
+        const chain = editor.chain().focus();
+        if (selection?.mode === 'rich' && selection.bookmark) {
+          chain.command(({ tr }) => {
+            try { tr.setSelection(selection.bookmark.resolve(tr.doc)); }
+            catch { /* The current caret remains the fallback if the document changed. */ }
+            return true;
+          });
+        }
+        chain.insertContent(html).run();
+      }
+      if (insertedSubject) setSubject(current => current.trim() ? current : insertedSubject);
+      bodyEditedRef.current = true; lastEditAtRef.current = Date.now();
+    },
+  };
+
   const modeLabel = isReply
     ? (replyAll ? t('compose.replyAll') : t('compose.reply'))
     : isForward ? t('compose.forward') : t('compose.newMessage');
@@ -2301,6 +2396,7 @@ export default function ComposeModal() {
         }}
       >
         <MaterialInput ref={fileInputRef} type="file" multiple onChange={handleFileSelect} style={{ display: 'none' }} />
+        <PluginSlot name="compose-observers" ctx={composerPluginContext} />
         {dropOverlay}
         {/* Header */}
         <div style={{
@@ -2572,6 +2668,7 @@ export default function ComposeModal() {
                   cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 1, WebkitTapHighlightColor: 'transparent' }}>
                 <MaterialIcon name="attach_file" />
               </MaterialButton>
+              <PluginSlot name="compose-actions" ctx={composerPluginContext} />
               {renderSignatureToggle()}
             </div>
           )}
@@ -2595,6 +2692,7 @@ export default function ComposeModal() {
           ) : (
             <div className="tiptap-compose" style={{ flex: '1 0 auto', minHeight: 200, display: 'flex', flexDirection: 'column' }}>
               <RichToolbar editor={editor} onAttach={() => fileInputRef.current?.click()}
+                pluginContext={composerPluginContext}
                 signatureControl={renderSignatureToggle()}
                 htmlMode={htmlMode}
                 onToggleHtml={() => {
@@ -2619,7 +2717,7 @@ export default function ComposeModal() {
               )}
               {htmlMode ? (
                 <MaterialTextarea
-                  value={htmlSource}
+                  ref={sourceTextareaRef} value={htmlSource}
                   onChange={e => setHtmlSource(e.target.value)}
                   spellCheck={false}
                   style={{
@@ -2995,6 +3093,7 @@ export default function ComposeModal() {
       }}
     >
       <MaterialInput ref={fileInputRef} type="file" multiple onChange={handleFileSelect} style={{ display: 'none' }} />
+      <PluginSlot name="compose-observers" ctx={composerPluginContext} />
       {dropOverlay}
       <MaterialInput ref={imageInputRef} type="file" accept="image/*" onChange={e => { const f = e.target.files?.[0]; if (f) insertImageIntoEditor(f); e.target.value = ''; }} style={{ display: 'none' }} />
       {/* Title bar */}
@@ -3199,6 +3298,7 @@ export default function ComposeModal() {
 
       {/* Toolbar — sits outside overflow container so dropdowns are never clipped */}
       {!plaintextEmail && <RichToolbar editor={editor} onAttach={() => fileInputRef.current?.click()} onInsertImage={() => imageInputRef.current?.click()}
+        pluginContext={composerPluginContext}
         signatureControl={renderSignatureToggle()}
         htmlMode={htmlMode}
         onToggleHtml={() => {
@@ -3249,7 +3349,7 @@ export default function ComposeModal() {
           />
         ) : htmlMode ? (
           <MaterialTextarea
-            value={htmlSource}
+            ref={sourceTextareaRef} value={htmlSource}
             onChange={e => setHtmlSource(e.target.value)}
             spellCheck={false}
             style={{
@@ -3385,6 +3485,7 @@ export default function ComposeModal() {
             <MaterialIcon name="attach_file" />
           </MaterialButton>
         )}
+        {plaintextEmail && <PluginSlot name="compose-actions" ctx={composerPluginContext} />}
         {plaintextEmail && renderSignatureToggle()}
 
         {error && <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--red)', flex: 1 }}>{error}</span>}
@@ -3838,7 +3939,7 @@ function ComposeAiPanel({ panel, mobile = false, onInstructionChange, onGenerate
   );
 }
 
-function RichToolbar({ editor, onAttach, onInsertImage, signatureControl, htmlMode, onToggleHtml, isMobile, aiEnabled, aiReplyEnabled, onAiAction, aiPanelOpen }) {
+export function RichToolbar({ editor, onAttach, onInsertImage, signatureControl, htmlMode, onToggleHtml, isMobile, aiEnabled, aiReplyEnabled, onAiAction, aiPanelOpen, pluginContext, extraControls }) {
   const { t } = useTranslation();
   const uiScale = useUiScale();
   const savedSelectionRef = useRef(null);
@@ -4078,6 +4179,8 @@ function RichToolbar({ editor, onAttach, onInsertImage, signatureControl, htmlMo
     <MaterialIcon name="table_chart" />
   </MaterialButton>;
   const moreControls = <>
+    {pluginContext && <PluginSlot name="compose-actions" ctx={pluginContext} />}
+    {extraControls}
 {aiEnabled && (
               <MaterialButton variant="icon" selected={aiMenuPos || aiPanelOpen} ref={aiBtnRef} title={t('compose.toolbar.aiAssist')} onMouseDown={e => {
                 e.preventDefault();

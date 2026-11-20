@@ -1,3 +1,4 @@
+import { bumpTagDefinitions, invalidateTags, refreshAllTags } from '../tags/tagStore.js';
 import { useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/index.js';
@@ -44,6 +45,7 @@ const STABLE_MS = 10000;
 // How long a socket that still says OPEN has to answer a ping when the tab comes back. A
 // connection that died while the device slept leaves the socket OPEN with no close to come.
 const PROBE_MS = 8000;
+export const PUSH_RECEIVED_EVENT = 'mailflow:push_received';
 
 export function useWebSocket() {
   const { t } = useTranslation();
@@ -110,6 +112,8 @@ export function useWebSocket() {
         // was down are lost, not buffered. Let each activated plugin resync (GTD refetches its
         // sections). Core stays plugin-agnostic.
         dispatchPluginReconnect();
+        refreshAllTags();
+        bumpTagDefinitions();
         // Scheduled messages that changed during the outage (#543): their list, once it is loaded.
         if (useStore.getState().scheduledList) scheduledFeed.changed();
       }
@@ -392,6 +396,14 @@ export function useWebSocket() {
         break;
       }
 
+      case 'tags_updated':
+        invalidateTags(Array.isArray(data.messageIds) ? data.messageIds : []);
+        break;
+      case 'tag_definitions_updated':
+        refreshAllTags();
+        bumpTagDefinitions();
+        break;
+
       default:
         // A message type core doesn't handle — hand it to any activated plugin that registered for
         // it (e.g. GTD's 'gtd_sections_updated'). No-op when nothing is registered.
@@ -419,9 +431,7 @@ export function useWebSocket() {
       reconnectAttempt.current = 0;
       connect();
     };
-    const revive = () => {
-      if (document.visibilityState !== 'visible') return;
-      void dismissReadNotifications(null, api.getMessage);
+    const probe = () => {
       const ws = wsRef.current;
       if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
         reviveNow();
@@ -436,11 +446,25 @@ export function useWebSocket() {
         if ((ws._lastActivity || 0) < askedAt) reviveNow();
       }, PROBE_MS);
     };
+    const revive = () => {
+      if (document.visibilityState !== 'visible') return;
+      void dismissReadNotifications(null, api.getMessage);
+      probe();
+    };
+    const onPush = () => {
+      if (wsRef.current?.readyState !== WebSocket.OPEN) {
+        window.dispatchEvent(new CustomEvent('mailflow:refresh'));
+        window.dispatchEvent(new CustomEvent('mailflow:counts_refresh'));
+      }
+      probe();
+    };
     document.addEventListener('visibilitychange', revive);
+    window.addEventListener(PUSH_RECEIVED_EVENT, onPush);
     window.addEventListener('online', revive);
     return () => {
       document.removeEventListener('visibilitychange', revive);
       window.removeEventListener('online', revive);
+      window.removeEventListener(PUSH_RECEIVED_EVENT, onPush);
     };
   }, [connect]);
 

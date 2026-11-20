@@ -1,3 +1,5 @@
+import { canTagMessage } from '../tags/tagStore.js';
+import { TagMenu } from '../tags/TagControls.jsx';
 import { spamFolderPaths as spamFolderPathsFor } from '../utils/spamFolders.js';
 import { descaleCss } from '../utils/uiScaleCss.js';
 import DateTimeInput from '../material/DateTimeInput.jsx';
@@ -135,7 +137,8 @@ export default function ContextMenu({ x, y, message, onClose, onAction, defaultM
   useEffect(() => {
     const menu = menuRef.current;
     if (!menu) return undefined;
-    const focusItems = () => [...menu.querySelectorAll('[role="menuitem"]:not([aria-disabled="true"])')];
+    const itemSelector = '[role="menuitem"], [role="menuitemcheckbox"]';
+    const focusItems = () => [...menu.querySelectorAll(itemSelector)].filter(item => item.getAttribute('aria-disabled') !== 'true');
     const focusItem = index => {
       const entries = focusItems();
       if (!entries.length) return;
@@ -144,7 +147,7 @@ export default function ContextMenu({ x, y, message, onClose, onAction, defaultM
       entries[index]?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     };
     const entries = focusItems();
-    const activeIndex = entries.indexOf(document.activeElement.closest?.('[role="menuitem"]'));
+    const activeIndex = entries.indexOf(document.activeElement.closest?.(itemSelector));
     entries.forEach((entry, i) => { entry.tabIndex = i === (activeIndex < 0 ? 0 : activeIndex) ? 0 : -1; });
     if (!menu.contains(document.activeElement)) focusItem(0);
     const handleKey = event => {
@@ -153,7 +156,7 @@ export default function ContextMenu({ x, y, message, onClose, onAction, defaultM
       if (!menu.contains(event.target) || event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
       const entries = focusItems();
       if (!entries.length) return;
-      const current = entries.indexOf(event.target.closest('[role="menuitem"]'));
+      const current = entries.indexOf(event.target.closest(itemSelector));
       let next = null;
       if (event.key === 'ArrowDown') next = current < 0 ? 0 : (current + 1) % entries.length;
       else if (event.key === 'ArrowUp') next = current < 0 ? entries.length - 1 : (current - 1 + entries.length) % entries.length;
@@ -314,6 +317,13 @@ export default function ContextMenu({ x, y, message, onClose, onAction, defaultM
           label: t('contextMenu.categorize'),
           icon: <MaterialIcon name="label" size={14} />,
           action: () => setCategorizeView('message'),
+          keepOpen: true,
+          hasSubmenu: true,
+        }] : []),
+        ...(canTagMessage(message?.id) && variant !== 'gtdSidebar' ? [{
+          label: t('tags.title'),
+          icon: <MaterialIcon name="label" size={14} />,
+          action: () => setPluginSubmenu(() => onBack => <TagMenu messageId={message.id} onBack={onBack} />),
           keepOpen: true,
           hasSubmenu: true,
         }] : []),

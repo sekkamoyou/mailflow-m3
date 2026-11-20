@@ -647,8 +647,12 @@ describe('conversation actions', () => {
     await React.act(async () => { await new Promise(r => setTimeout(r, 100)); });
     const chat = requests.find(r => r.url.includes('/ai/chat'));
     assert.ok(chat, 'the action went to the AI endpoint');
-    assert.match(JSON.parse(chat.body).messages[0].content, /body of m1/, 'with this message\'s text');
-    assert.equal(JSON.parse(chat.body).purpose, 'summarize', 'under the summaries switch (#644)');
+    const { messages, purpose } = JSON.parse(chat.body);
+    assert.deepEqual(messages.map(message => message.role), ['system', 'user', 'user']);
+    assert.doesNotMatch(messages[0].content, /body of m1/);
+    assert.match(messages[1].content, /body of m1/);
+    assert.doesNotMatch(messages[2].content, /body of m1/);
+    assert.equal(purpose, 'summarize', 'under the summaries switch (#644)');
     assert.match(card('m1').textContent, /Short summary\./, 'the result is pinned on this message');
     assert.doesNotMatch(card('m3').textContent, /Short summary/, 'and only on this message');
   });

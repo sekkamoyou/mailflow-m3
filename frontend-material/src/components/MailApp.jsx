@@ -12,7 +12,7 @@ import InboxReplyDraftObserver from './InboxReplyDraftObserver.js';
 import { useStore } from '../store/index.js';
 import { api, setPageClosing } from '../utils/api.js';
 import { flushUndoables } from '../utils/undoableAction.js';
-import { useWebSocket } from '../hooks/useWebSocket.js';
+import { PUSH_RECEIVED_EVENT, useWebSocket } from '../hooks/useWebSocket.js';
 import { useMobile } from '../hooks/useMobile.js';
 import { LAYOUTS } from '../layouts.js';
 import { closeOpenMessage } from '../utils/closeMessage.js';
@@ -376,7 +376,8 @@ export default function MailApp() {
     let onSwMessage;
     if ('serviceWorker' in navigator) {
       onSwMessage = (event) => {
-        if (event.data && event.data.type === 'mailflow_deeplink') consumePendingDeepLink();
+        if (event.data?.type === 'mailflow_deeplink') consumePendingDeepLink();
+        if (event.data?.type === 'mailflow_push') window.dispatchEvent(new CustomEvent(PUSH_RECEIVED_EVENT));
       };
       navigator.serviceWorker.addEventListener('message', onSwMessage);
     }

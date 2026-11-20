@@ -1,3 +1,4 @@
+import { HeaderTags } from '../tags/TagControls.jsx';
 import { useMessageMetadata } from '../hooks/useMessageMetadata.js';
 import { MaterialIcon } from '../material/controls.jsx';
 import { MaterialButton } from '../material/controls.jsx';
@@ -328,6 +329,7 @@ export default function ConversationPane({ threadId, folder, unified = false, ac
       }}>
         {newestConversationMessage(messages)?.subject || ''}
       </div>
+      {headerMessage && <HeaderTags key={headerMessage.id} messageId={headerMessage.id} />}
       {headerMessage && <PluginSlot name="message-header-meta" ctx={headerContext} />}
     </div>
   );
@@ -372,6 +374,7 @@ export default function ConversationPane({ threadId, folder, unified = false, ac
         <ActionBtn onClick={e => openPicker(e, 'snooze')} label={t('contextMenu.snooze.label')} touch={isMobile} popup expanded={picker?.view === 'snooze'}>
           <SnoozeIcon />
         </ActionBtn>
+        {!hasBackBar && headerMessage && <HeaderTags key={headerMessage.id} messageId={headerMessage.id} />}
         {!hasBackBar && headerMessage && <PluginSlot name="message-header-meta" ctx={headerContext} />}
         <div style={{ flex: 1 }} />
         {isMobile ? <MessageTools key={threadId} isMobile items={[

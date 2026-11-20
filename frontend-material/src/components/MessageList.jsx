@@ -1,3 +1,4 @@
+import { MessageTags } from '../tags/TagControls.jsx';
 import MessageClassification from './MessageClassification.jsx';
 import { useMessageMetadata } from '../hooks/useMessageMetadata.js';
 import { createPortal } from 'react-dom';
@@ -4320,6 +4321,7 @@ function ThreadRow({ message, isExpanded, threadMsgs, isLoadingThread, selectedM
             </div>
           )}
         <div className="md-row-badges">
+          <MessageTags messageId={message.id} />
           <PluginSlot name="message-row-meta" ctx={{ message }} />
           <ReplyDraftIndicator message={message} listRow />
           <SpamBadge message={message} onClick={onExplainSpam} />
@@ -4578,6 +4580,7 @@ function MessageRow({ message, selected, lastViewed, isChecked, selectionMode, s
           </div>
         )}
         <div className="md-row-badges">
+          <MessageTags messageId={message.id} />
           <PluginSlot name="message-row-meta" ctx={{ message }} />
           <ReplyDraftIndicator message={message} listRow />
           <SpamBadge message={message} onClick={onExplainSpam} />

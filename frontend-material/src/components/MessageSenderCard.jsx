@@ -1,3 +1,4 @@
+import { HeaderTags } from '../tags/TagControls.jsx';
 import { useTranslation } from 'react-i18next';
 import { PluginSlot } from '../plugins/PluginSlot.jsx';
 import { useStore } from '../store/index.js';
@@ -52,6 +53,7 @@ export default function MessageSenderCard({ message, body, isMobile, resolvedSub
           </span>
           <MessageClassification message={message} />
           <SpamBadge message={message} onClick={(m) => onSpamExplain?.(m.id)} />
+          <HeaderTags key={message.id} messageId={message.id} />
           <PluginSlot name="message-header-meta" ctx={{ message, account }} />
         </div>
       </div>

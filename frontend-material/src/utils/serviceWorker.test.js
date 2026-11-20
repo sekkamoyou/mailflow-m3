@@ -10,7 +10,7 @@ const SOURCE = readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf
 const ID = '11111111-1111-4111-8111-111111111111';
 
 // Load sw.js against a fake service worker scope. `respond(path, init)` answers fetch.
-function loadWorker(respond = () => ({ ok: true, json: async () => ({}) }), workerUrl = 'https://mail.example/sw.js') {
+function loadWorker(respond = () => ({ ok: true, json: async () => ({}) }), workerUrl = 'https://mail.example/sw.js', clients = []) {
   const listeners = {};
   const shown = [];
   const opened = [];
@@ -18,7 +18,7 @@ function loadWorker(respond = () => ({ ok: true, json: async () => ({}) }), work
   const self = {
     addEventListener: (type, fn) => { listeners[type] = fn; },
     registration: { showNotification: async (title, options) => { shown.push(JSON.parse(JSON.stringify({ title, options }))); } },
-    clients: { matchAll: async () => [], openWindow: async url => { opened.push(url); } },
+    clients: { matchAll: async () => clients, openWindow: async url => { opened.push(url); } },
     location: { origin: 'https://mail.example', href: workerUrl },
   };
   const fetch = async (path, init) => {
@@ -48,6 +48,15 @@ test('a push about one message offers the two actions; a summary card offers non
   assert.deepEqual(sw.shown[0].options.actions.map(a => a.action), ['read', 'archive']);
   assert.deepEqual(sw.shown[0].options.data, { url: `/?m=${ID}`, messageId: ID });
   assert.equal(sw.shown[1].options.actions, undefined);
+});
+
+test('new mail wakes every open tab while keeping the push notification', async () => {
+  const posted = [];
+  const client = label => ({ postMessage: data => posted.push([label, data.type]) });
+  const sw = loadWorker(undefined, undefined, [client('one'), { postMessage() { throw new Error('closed'); } }, client('two')]);
+  await sw.run('push', push({ title: 'Sample new mail' }));
+  assert.deepEqual(posted, [['one', 'mailflow_push'], ['two', 'mailflow_push']]);
+  assert.equal(sw.shown.length, 1);
 });
 
 test('Mark as read marks the message read without opening the app', async () => {

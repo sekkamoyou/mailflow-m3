@@ -31,6 +31,7 @@ The screenshots use sample mailboxes. Select an image to open it at full size.
 - **Web interface** — Material 3 navigation, controls, and dialogs for desktop and mobile, with refined Korean UI text.
 - **Appearance** — synchronize preferences between devices or keep separate desktop and mobile settings. Administrators can customize instance branding.
 - **Messages and notifications** — message-list previews and metadata, notification avatars, configurable push priority by mail category, and dismissal of an individual PWA notification after its message is marked read.
+- **MailFlow 4.5 features** — message tags, reusable snippets through the Templates plugin, outgoing notification webhooks, label actions in rules, sign-in duration and time-format preferences, and push-triggered reconnection.
 - **Backend compatibility** — OpenCode Go support, Yahoo Japan IMAP provider detection, NAVER empty-folder handling, and fixes for reconciling messages deleted in other mail clients. The fork uses the upstream v4.5.1 database migrations.
 
 ## Run MailFlow M3
@@ -75,7 +76,7 @@ Serve `frontend-material/dist/` with a reverse proxy and follow the [frontend gu
 ## Versions and build information
 
 - **Frontend** — [`v0.1`](https://github.com/sekkamoyou/mailflow-m3/tree/v0.1) is the initial frontend tag. The frontend package version shown in **Settings → About** is `0.1.0`.
-- **Backend** — **Settings → About** displays the upstream API version with the fork suffix, for example `v4.5.1-m3`. The backend build is the first seven characters of the SHA reported by `/api/version`. The frontend build is derived from `VITE_BUILD_SHA`.
+- **Backend** — **Settings → About** displays the upstream API version with the fork suffix, for example `v4.5.1-m3`. The `4.5.1-m3` tag pins the backend merge. The backend build is the first seven characters of the SHA reported by `/api/version`. The frontend build is derived from `VITE_BUILD_SHA`.
 - **Source links** — **Settings → About** uses the two source URLs set at frontend build time. Point each URL to the exact deployed revision and refresh the relevant link when a deployment changes it.
 
 ## License and third-party notices

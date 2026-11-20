@@ -115,6 +115,19 @@ const dir = dirname(fileURLToPath(import.meta.url));
 // Two locales sharing a value is only allowed if both appear in the same group.
 // Any unlisted pair will still fail.
 const SAME_VALUE_ALLOWED = {
+  'templates.name': [['en', 'de'], ['it', 'ptBR']],
+  'templates.variables.date': [['en', 'fr'], ['it', 'ptBR', 'pl'], ['de', 'cs']],
+  'templates.variables.groups.date': [['en', 'fr'], ['it', 'ptBR', 'pl'], ['de', 'cs']],
+  'templates.variables.groups.contact': [['en', 'fr'], ['de', 'cs', 'pl']],
+  'templates.variables.fullName': [['it', 'ptBR']],
+  'templates.variables.givenName': [['it', 'ptBR']],
+  'admin.appearance.timeFormatAuto': [['es', 'ptBR']],
+  'admin.appearance.timeFormat12':   [['es', 'ptBR']],
+  'admin.appearance.timeFormat24':   [['es', 'ptBR']],
+  'tags.title': [['de', 'en', 'fr', 'ptBR']],
+  'tags.settings.name':  [['de', 'en'], ['it', 'ptBR']],
+  'tags.settings.color': [['en', 'es']],
+
   'material.palettes.hexValue': 'any', // HEX is a technical color format in every locale.
   'material.palettes.custom': [['es', 'ptBR']],
   'material.palettes.blue': [['es', 'ptBR']],
@@ -615,6 +628,8 @@ const SAME_VALUE_ALLOWED = {
 // to carry unused keys. Existing locale files may also define their own forms.
 const LOCALE_SPECIFIC_KEYS_BY_LOCALE = {
   cs: new Set([
+    'admin.session.days_few', 'admin.session.days_many',
+    'admin.session.default_few', 'admin.session.default_many',
     'message.attachment_few', 'message.attachment_many',
     'messageList.bulkDeleted.title_few', 'messageList.bulkDeleted.title_many',
     'messageList.bulkDeleted.failBody_few', 'messageList.bulkDeleted.failBody_many',
@@ -628,6 +643,8 @@ const LOCALE_SPECIFIC_KEYS_BY_LOCALE = {
     'admin.messageList.markReadDelaySeconds_many',
   ]),
   pl: new Set([
+    'admin.session.days_few', 'admin.session.days_many',
+    'admin.session.default_few', 'admin.session.default_many',
     'message.attachment_few', 'message.attachment_many',
     'messageList.bulkDeleted.title_few', 'messageList.bulkDeleted.title_many',
     'messageList.bulkDeleted.failBody_few', 'messageList.bulkDeleted.failBody_many',
@@ -639,6 +656,10 @@ const LOCALE_SPECIFIC_KEYS_BY_LOCALE = {
     'admin.messageList.markReadDelaySeconds_one',
     'admin.messageList.markReadDelaySeconds_few',
     'admin.messageList.markReadDelaySeconds_many',
+  ]),
+  ru: new Set([
+    'admin.session.days_few', 'admin.session.days_many',
+    'admin.session.default_few', 'admin.session.default_many',
   ]),
 };
 const LOCALE_SPECIFIC_KEYS = new Set(

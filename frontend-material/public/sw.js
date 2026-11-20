@@ -67,7 +67,7 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.clients
       .matchAll({ type: 'window', includeUncontrolled: true })
-      .then(() => {
+      .then(clients => {
         const promises = [];
 
         // Update the home screen badge (iOS 17.4+, Android Chrome PWA).
@@ -102,6 +102,9 @@ self.addEventListener('push', (event) => {
           }))
         );
 
+        for (const client of clients) {
+          try { client.postMessage({ type: 'mailflow_push' }); } catch { /* A tab may close during delivery. */ }
+        }
         return Promise.all(promises);
       })
   );

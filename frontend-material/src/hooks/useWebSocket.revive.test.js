@@ -29,7 +29,7 @@ globalThis.WebSocket = FakeSocket;
 const React = await import('react');
 const { createRoot } = await import('react-dom/client');
 const { api } = await import('../utils/api.js');
-const { useWebSocket } = await import('./useWebSocket.js');
+const { PUSH_RECEIVED_EVENT, useWebSocket } = await import('./useWebSocket.js');
 const { installResumeRefresh, RESUME_RETRY_MS } = await import('../utils/resumeRefresh.js');
 const flush = async () => { for (let i = 0; i < 20; i += 1) await Promise.resolve(); };
 function App() { useWebSocket(); return null; }
@@ -116,4 +116,78 @@ test('a reconnect whose catch-up fails leaves a resume retry in place', async (t
     stop();
     Math.random = realRandom;
   }
+});
+
+// A push travels through the browser's push service, not the socket, so it still arrives when the
+// socket died without closing (a VPN dropping an idle stream). The polled counts rose while the
+// list never got the new mail. A push now has the tab check its socket, hidden or not.
+// The socket opened a while before (a frame at the very moment of the push would answer it).
+function pushArrives(t, after = 5000) {
+  t.mock.timers.tick(after);
+  window.dispatchEvent(new CustomEvent(PUSH_RECEIVED_EVENT));
+}
+function countEvents(names) {
+  const seen = Object.fromEntries(names.map(n => [n, 0]));
+  const handlers = names.map(n => [n, () => { seen[n] += 1; }]);
+  for (const [n, h] of handlers) window.addEventListener(n, h);
+  return { seen, stop: () => { for (const [n, h] of handlers) window.removeEventListener(n, h); } };
+}
+
+test('a push has a hidden tab replace a socket that no longer answers, and the reconnect catches up', async (t) => {
+  visibility = 'hidden';
+  const stale = socket;
+  const events = countEvents(['mailflow:refresh', 'mailflow:counts_refresh']);
+  try {
+    pushArrives(t);
+    assert.equal(stale.sent.at(-1), 'ping', 'the socket is asked to prove it is alive, though the tab is hidden');
+    assert.equal(events.seen['mailflow:refresh'], 0, 'an OPEN socket is trusted until the probe says otherwise');
+    t.mock.timers.tick(8000);
+    assert.notEqual(socket, stale, 'no answer, so a new socket is opened');
+    socket.onopen();
+    await flush();
+    assert.equal(events.seen['mailflow:refresh'], 1, 'the reconnect reloads the list');
+  } finally {
+    events.stop();
+  }
+});
+
+test('a push with a healthy socket changes nothing', (t) => {
+  const live = socket;
+  const events = countEvents(['mailflow:refresh', 'mailflow:counts_refresh']);
+  try {
+    pushArrives(t);
+    live.onmessage({ data: JSON.stringify({ type: 'pong' }) });
+    t.mock.timers.tick(30_000);
+    assert.equal(socket, live);
+    assert.deepEqual(events.seen, { 'mailflow:refresh': 0, 'mailflow:counts_refresh': 0 });
+  } finally {
+    events.stop();
+  }
+});
+
+test('a push while the socket is down reconnects at once and reloads the list and counts now', (t) => {
+  const realRandom = Math.random;
+  Math.random = () => 0;
+  const events = countEvents(['mailflow:refresh', 'mailflow:counts_refresh']);
+  try {
+    const dropped = socket;
+    dropped.readyState = FakeSocket.CLOSED;
+    dropped.onclose({ code: 1006 });
+    assert.equal(socket, dropped, 'the reconnect waits out its backoff');
+    pushArrives(t, 0);
+    assert.notEqual(socket, dropped, 'the push skips the backoff');
+    assert.deepEqual(events.seen, { 'mailflow:refresh': 1, 'mailflow:counts_refresh': 1 });
+  } finally {
+    events.stop();
+    Math.random = realRandom;
+  }
+});
+
+test('two pushes in a row send one probe', (t) => {
+  const stale = socket;
+  pushArrives(t);
+  pushArrives(t);
+  assert.equal(stale.sent.filter(s => s === 'ping').length, 1);
+  t.mock.timers.tick(8000);
+  assert.notEqual(socket, stale);
 });

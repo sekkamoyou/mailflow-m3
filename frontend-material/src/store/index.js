@@ -1,3 +1,4 @@
+import { clearTagCache } from '../tags/tagStore.js';
 import { create } from 'zustand';
 import { PUSH_CATEGORIES, PUSH_PRIORITIES, normalizePushPriorities } from '../utils/pushPriorities.js';
 import { resolveConversationMode, groupsMessageList, conversationModeTransition, isConversationMode } from '../utils/conversationMode.js';
@@ -137,6 +138,8 @@ export const useStore = create((set, get) => ({
     // flush so the previous user's debounce can't save into the new/absent session.
     if (get().user?.id !== user?.id) {
       cancelPendingPrefSave();
+      clearTagCache();
+      localStorage.removeItem('mailflow_time_format');
       get().switchAppearanceUser(user?.id);
       clearTimeout(pendingCountTimer);
       pendingCountTimer = null;
@@ -154,6 +157,7 @@ export const useStore = create((set, get) => ({
         unreadCounts: { total: 0, byAccount: {}, snapshots: {}, complete: false },
         snoozedCount: 0,
         ...SCHEDULED_RESET,
+        timeFormat: 'auto', sessionDays: 0, sessionDaysDefault: 7,
         senderFaviconsLoaded: false,
         senderFavicons: false,
         senderFaviconsSaving: false,
@@ -280,6 +284,13 @@ export const useStore = create((set, get) => ({
     const channel = new MessageChannel();
     channel.port1.onmessage = () => { channel.port1.close(); api.lock().catch(() => {}); };
     channel.port2.postMessage(null);
+  },
+  sessionDays: 0,
+  sessionDaysDefault: 7,
+  setSessionDays: async (days) => {
+    const owner = get().user?.id;
+    await api.savePreferences({ sessionDays: days });
+    if (get().user?.id === owner) set({ sessionDays: days });
   },
   autoLockMinutes: 0,
   setAutoLockMinutes: (m) => {
@@ -765,6 +776,18 @@ export const useStore = create((set, get) => ({
 
 
   // Language
+  // Time format (#758): 'auto' follows the language as before, '12' / '24' force a
+  // 12- or 24-hour clock wherever formatDate.js renders a time. Read by that helper
+  // straight from localStorage, so the list and reading pane pick it up on render.
+  timeFormat: ['auto', '12', '24'].includes(localStorage.getItem('mailflow_time_format'))
+    ? localStorage.getItem('mailflow_time_format') : 'auto',
+  setTimeFormat: (val) => {
+    const v = ['auto', '12', '24'].includes(val) ? val : 'auto';
+    localStorage.setItem('mailflow_time_format', v);
+    set({ timeFormat: v });
+    schedulePrefSave({ timeFormat: v });
+  },
+
   language: initialLanguage,
   setLanguage: (lng) => {
     localStorage.setItem('mailflow_language', lng);
@@ -1422,6 +1445,11 @@ export const useStore = create((set, get) => ({
       // blockRemoteImages: explicit false disables blocking; anything else keeps the default (true)
       if (prefs.blockRemoteImages === false) set({ blockRemoteImages: false });
       else if (prefs.blockRemoteImages === true) set({ blockRemoteImages: true });
+      if (prefs.sessionDays != null) {
+        const n = Number(prefs.sessionDays);
+        set({ sessionDays: [7, 14, 30, 60, 90].includes(n) ? n : 0 });
+      }
+      if (Number(prefs.sessionDaysDefault) > 0) set({ sessionDaysDefault: Number(prefs.sessionDaysDefault) });
       if (prefs.autoLockMinutes != null) {
         const n = Number(prefs.autoLockMinutes);
         set({ autoLockMinutes: [0, 1, 5, 15, 30].includes(n) ? n : 0 });
@@ -1469,6 +1497,10 @@ export const useStore = create((set, get) => ({
         localStorage.setItem('mailflow_language', prefs.language);
         set({ language: prefs.language });
         i18n.changeLanguage(prefs.language);
+      }
+      if (['auto', '12', '24'].includes(prefs.timeFormat)) {
+        localStorage.setItem('mailflow_time_format', prefs.timeFormat);
+        set({ timeFormat: prefs.timeFormat });
       }
       if (isConversationMode(prefs.conversationMode) || typeof prefs.threadedView === 'boolean') {
         const mode = resolveConversationMode(prefs);

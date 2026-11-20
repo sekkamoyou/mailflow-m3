@@ -54,7 +54,13 @@ dom.window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEv
 const pinnedBackendSha = '56789abcdef0123456789abcdef0123456789abc';
 const pinnedBackendUrl = `https://github.com/sekkamoyou/mailflow-m3/tree/${pinnedBackendSha}/backend`;
 globalThis.__VITE_ENV__ = { MODE: 'test', DEV: false, PROD: true, VITE_BACKEND_SOURCE_URL: pinnedBackendUrl };
-globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => '' });
+globalThis.fetch = async url => {
+  const responses = {
+    '/api/tags/definitions': [],
+    '/api/categories/sources': { sources: [], builtinSets: [] },
+  };
+  return { ok: true, status: 200, json: async () => responses[url] ?? {}, text: async () => '' };
+};
 
 const React = await import('react');
 const { createRoot } = await import('react-dom/client');
@@ -94,10 +100,10 @@ test('About is available to regular users and separates versions from short buil
     assert.equal(licenseLink?.getAttribute('href'), '/licenses/AGPL-3.0.txt');
     assert.equal(licenseLink?.textContent, 'AGPL-3.0');
     await React.act(async () => useStore.setState({ adminTab: 'accounts' }));
-    backendVersion = '4.5.2';
+    backendVersion = '4.5.1';
     backendSha = '0123456789abcdef0123456789abcdef01234567';
     await React.act(async () => useStore.setState({ adminTab: 'about' }));
-    assert.equal(rowValue('admin.about.version'), 'v4.5.2-m3');
+    assert.equal(rowValue('admin.about.version'), 'v4.5.1-m3');
     assert.equal(rowValue('admin.about.backendBuild'), '0123456');
     await React.act(async () => useStore.setState({ adminTab: 'accounts' }));
     backendSha = 'dev';
@@ -475,6 +481,42 @@ test('category enablement reuses the named trailing switch and preserves its cal
     await React.act(async () => root.unmount());
     api.categories.getSources = getSources;
     useStore.setState({ setCategorizationEnabled: setEnabled });
+  }
+});
+
+test('category settings can create and refresh MailFlow 4.5 tags', async () => {
+  const original = globalThis.fetch;
+  const tag = { id: 'tag-1', name: 'Sample tag', color: '#3b82f6' };
+  const definitions = [];
+  const writes = [];
+  globalThis.fetch = async (url, options) => {
+    if (url !== '/api/tags/definitions') return original(url, options);
+    if (options.method === 'POST') {
+      writes.push(JSON.parse(options.body));
+      definitions.push(tag);
+      return new Response(JSON.stringify(tag), { status: 201 });
+    }
+    return new Response(JSON.stringify(definitions));
+  };
+  useStore.setState({ user: { id: 'u1' }, accounts: [], adminTab: 'categories' });
+  const root = createRoot(document.getElementById('root'));
+  try {
+    await React.act(async () => root.render(React.createElement(AdminPanel)));
+    const section = [...document.querySelectorAll('section')].find(element => element.querySelector('h3')?.textContent === 'tags.title');
+    const button = label => [...section.querySelectorAll('button')].find(element => element.textContent === label);
+    await React.act(async () => button('tags.settings.add').click());
+    const name = section.querySelector('input[maxlength="80"]');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    await React.act(async () => {
+      setter.call(name, tag.name);
+      name.dispatchEvent(new window.Event('input', { bubbles: true }));
+    });
+    await React.act(async () => button('tags.settings.create').click());
+    assert.deepEqual(writes, [{ name: tag.name, color: tag.color }]);
+    assert.match(section.textContent, /Sample tag/);
+  } finally {
+    await React.act(async () => root.unmount());
+    globalThis.fetch = original;
   }
 });
 

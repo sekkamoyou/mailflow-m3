@@ -1042,6 +1042,16 @@
     "errorProcess": "Impossibile elaborare l'immagine."
   },
   "admin": {
+    "session": {
+      "title": "Resta connesso",
+      "description": "Per quanto tempo questo account resta connesso su un dispositivo che non usi più. Ogni visita fa ripartire il conteggio.",
+      "days_one": "{{count}} giorno",
+      "days_other": "{{count}} giorni",
+      "default_one": "Predefinito ({{count}} giorno)",
+      "default_other": "Predefinito ({{count}} giorni)",
+      "saved": "Salvato",
+      "failed": "Impossibile salvare"
+    },
     "cleanup": {
       "title": "Pulizia della casella",
       "intro": "Trova la posta di massa che intasa la tua posta in arrivo e fai piazza pulita. Scegli se archiviarla (conservata e ricercabile) o spostarla nel cestino (recuperabile finché non lo svuoti).",
@@ -1098,6 +1108,11 @@
       "mailSignIn": "Provider di posta"
     },
     "rules": {
+      "actionApplyLabel": "Applica etichetta",
+      "actionApplyLabelPlaceholder": "Nome dell'etichetta, es. Ricevute",
+      "actionApplyLabelHint": "Copia il messaggio in una cartella con questo nome in ogni account, creata la prima volta. Spostamento, archiviazione o eliminazione attendono che l'etichetta sia applicata.",
+      "errorLabelEmpty": "Inserisci un nome per l'etichetta.",
+      "errorLabelInvalid": "I nomi delle etichette non possono contenere *, % o \\, iniziare o finire con /, chiamarsi INBOX o superare i 100 caratteri.",
       "title": "Regole posta in arrivo",
       "newButton": "Nuova regola",
       "empty": "Nessuna regola ancora. Le regole filtrano automaticamente la posta in arrivo.",
@@ -1294,6 +1309,11 @@
       "deleteConfirmLabel": "Elimina"
     },
     "appearance": {
+      "timeFormat": "Formato ora",
+      "timeFormatDesc": "Scegli un orologio di 12 o 24 ore, oppure segui la lingua.",
+      "timeFormatAuto": "Automatico",
+      "timeFormat12": "12 ore",
+      "timeFormat24": "24 ore",
       "title": "Aspetto",
       "description": "Scegli un tema colore per l'interfaccia",
       "darkEmailBodies": "Corpo delle email scuro",
@@ -2502,5 +2522,95 @@
     "hour": "Ora (0–23)",
     "minute": "Minuto",
     "clear": "Cancella"
+  },
+  "tags": {
+    "title": "Tag",
+    "header": {
+      "hide": "Nascondi i tag",
+      "none": "Nessun tag definito. Creane alcuni nelle impostazioni."
+    },
+    "settings": {
+      "note": "I tag sono salvati solo in MailFlow; non viene scritto nulla sui tuoi server di posta.",
+      "name": "Nome",
+      "color": "Colore",
+      "confirmDelete": "Eliminare il tag «{{name}}» e rimuoverlo da tutti i messaggi?",
+      "add": "Aggiungi un tag",
+      "create": "Crea"
+    }
+  },
+  "templates": {
+    "title": "Modelli",
+    "new": "Nuovo frammento",
+    "name": "Nome",
+    "content": "Contenuto",
+    "empty": "Nessun frammento salvato.",
+    "deleteConfirm": "Eliminare questo frammento?",
+    "insert": "Inserisci",
+    "saveContent": "Salva come frammento",
+    "recipientChanged": "Il destinatario è cambiato. Inserisci di nuovo il frammento.",
+    "hint": "Le date vengono compilate all’inserimento. I nomi vengono compilati dopo aver inserito il primo destinatario A. I valori mancanti restano segnaposto.",
+    "variables": {
+      "insert": "Inserisci variabile",
+      "placeholder": "Inserisci segnaposto",
+      "confirm": "Inserisci",
+      "hint": "Scegli una variabile da inserire nella posizione del cursore.",
+      "date": "Data",
+      "longDate": "Data estesa",
+      "dateTime": "Data e ora",
+      "month": "Mese",
+      "fullName": "Nome completo",
+      "givenName": "Nome",
+      "surname": "Cognome",
+      "groups": {
+        "date": "Data",
+        "contact": "Contatto"
+      }
+    }
+  },
+  "webhooks": {
+    "useToken": "Usa un token di autenticazione",
+    "removeConfirm": "Eliminare questa configurazione? Le notifiche verranno disattivate e URL e token salvati saranno rimossi.",
+    "remove": "Elimina configurazione notifiche",
+    "removed": "URL e token salvati rimossi.",
+    "errors": {
+      "url": "Inserisci un URL di notifica valido.",
+      "urlScheme": "Usa un URL HTTP o HTTPS senza nome utente, password o frammento.",
+      "settings": "Controlla le impostazioni delle notifiche e riprova.",
+      "origin": "Inserisci protocollo, host e porta facoltativa, senza percorso o parametri di query.",
+      "format": "Scegli un formato di notifica supportato.",
+      "tokenPreset": "I token di autenticazione sono supportati solo per ntfy e Gotify.",
+      "https": "Gli URL di notifica pubblici devono usare HTTPS.",
+      "urlRequired": "Inserisci un URL prima di attivare le notifiche.",
+      "token": "Inserisci un token valido senza spazi o caratteri non ASCII.",
+      "session": "La sessione è scaduta. Accedi di nuovo.",
+      "admin": "Sono necessari i permessi di amministratore.",
+      "timeout": "Tempo di invio scaduto. Controlla il servizio e riprova.",
+      "blocked": "La destinazione è bloccata dai criteri di rete del server.",
+      "delivery": "Impossibile inviare la notifica. Controlla il servizio e la connessione.",
+      "rateLimit": "Troppe notifiche. Attendi un minuto e riprova.",
+      "disabled": "Le notifiche sono disattivate. Controlla le tue impostazioni e quelle dell’amministratore.",
+      "unavailable": "Il servizio di notifica è temporaneamente indisponibile. Riprova più tardi.",
+      "http": "Il servizio di notifica ha restituito HTTP {{status}}. Controlla indirizzo e autenticazione.",
+      "request": "Impossibile completare la richiesta. Controlla la connessione e riprova."
+    },
+    "title": "Webhook in uscita",
+    "description": "Invia il nome dell’account e il numero di nuove email a un endpoint di notifica. I dettagli facoltativi descrivono solo l’ultimo messaggio idoneo. Il corpo dei messaggi non viene mai inviato.",
+    "unavailable": "I webhook sono disabilitati dall’amministratore.",
+    "disabled": "Interrotto dopo cinque errori consecutivi. Abilita e salva per riprendere le notifiche.",
+    "enable": "Abilita il mio webhook",
+    "format": "Formato dei dati",
+    "generic": "JSON generico",
+    "url": "URL dell’endpoint",
+    "token": "Token di autenticazione facoltativo",
+    "secretKept": "Configurato •••••••• — lascia vuoto per mantenere",
+    "sender": "Invia il mittente all’endpoint",
+    "subject": "Invia l’oggetto all’endpoint",
+    "testHelp": "Salva le modifiche prima del test. I test usano la configurazione salvata e condividono il limite di 10 tentativi al minuto.",
+    "test": "Invia notifica di prova",
+    "testSent": "Notifica di prova inviata.",
+    "saved": "Impostazioni del webhook salvate.",
+    "adminEnable": "Consenti webhook di notifica agli utenti",
+    "origins": "Origini private consentite (una per riga)",
+    "originsHelp": "Inserisci origini esatte con protocollo, host e porta, senza percorso. Gli endpoint pubblici richiedono HTTPS. Le destinazioni private consentite possono usare HTTP; gli indirizzi di loopback, link-local e riservati restano bloccati."
   }
 }
