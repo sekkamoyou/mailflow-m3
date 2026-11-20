@@ -42,7 +42,7 @@ import AiResultBox from './AiResultBox.jsx';
 import { useAiActions } from '../hooks/useAiActions.js';
 import AttachmentStrip from './AttachmentStrip.jsx';
 import {
-  ActionBtn, MessageTools, ReplySplitButton, RemoteImagesNotice, UnsubscribeNotice, TOUCH_MIN,
+  ActionBtn, MessageTools, ReplySplitButton, RemoteImagesNotice, UnsubscribeNotice,
   AiReplyIcon, ForwardIcon, ArchiveIcon, MoveIcon, SpamIcon, HamIcon, TodoistIcon, ReadStateIcon, HeadersIcon,
   DownloadIcon, PrintIcon, DarkToggleIcon, StarIcon, TrashIcon, useShortcutTitle,
 } from './MessageActions.jsx';
@@ -235,7 +235,6 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
   const aiResults = ai.results;
   const [aiClassifying, setAiClassifying] = useState(false);
   const [unsubscribeStatus, setUnsubscribeStatus] = useState(null); // null | 'loading' | 'done' | 'error'
-  const moveBtnRef = useRef(null);
   // In-flight AI actions live in a module-level registry, keyed by message AND action, so they
   // outlive this component. Navigating, closing a pop-out and changing layout all deliberately
   // leave them running: the result is saved against the message it was started from, so letting
@@ -914,13 +913,13 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
         background: 'var(--bg-primary)',
       }}>
         {isMobile && (
-          <div style={{
+          <div className="material-reader-back-bar" style={{
             display: 'flex', alignItems: 'center', gap: 8,
             padding: '10px 14px', borderBottom: '1px solid var(--border-subtle)',
             background: 'var(--bg-secondary)', flexShrink: 0,
           }}>
-            <MaterialButton variant="text"
-              onClick={() => setSelectedMessage(null)}
+            <MaterialButton variant="text" data-reader-back="" aria-label={t('common.back')}
+              onClick={closeOpenMessage}
               style={{
                 background: 'none', border: 'none', color: 'var(--accent)',
                 cursor: 'pointer', display: 'flex', alignItems: 'center',
@@ -928,7 +927,7 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
               }}
             >
               <MaterialIcon name="chevron_left" />
-              {t('common.back')}
+              <span>{t('common.back')}</span>
             </MaterialButton>
           </div>
         )}
@@ -1279,6 +1278,12 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
   const aiReplyShown = aiReplyAvailable(aiStatus, plaintextEmail);
   const handleAiReply = () => handleReply(defaultReplyAll, { aiReply: true });
   const toolItems = message ? [
+    ...(isMobile ? [
+      { key: 'forward', label: t('message.forward'), icon: <ForwardIcon />, onClick: handleForward },
+      { key: 'move', label: t('contextMenu.moveToFolder'), icon: <MoveIcon />, onClick: handleOpenMovePicker },
+      { key: 'star', label: t('message.star'), icon: <StarIcon filled={message.is_starred} />, checked: Boolean(message.is_starred), onClick: handleStarToggle },
+      { key: 'delete', label: t('message.delete'), icon: <TrashIcon />, danger: true, onClick: handleDelete },
+    ] : []),
     aiReplyShown && isMobile && { key: 'aiReply', label: t('compose.toolbar.aiReply'), icon: <AiReplyIcon />, onClick: handleAiReply },
     hasSpamFolder && !inSpamFolder && { key: 'spam', label: t('contextMenu.markAsSpam'), icon: <SpamIcon />, onClick: () => performSingleSpamLabel('spam') },
     inSpamFolder && { key: 'ham', label: t('contextMenu.markAsHam'), icon: <HamIcon />, onClick: () => performSingleSpamLabel('ham') },
@@ -1309,14 +1314,13 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
       style={{
         flex: 1, display: 'flex', flexDirection: 'column',
         overflow: 'hidden', background: 'var(--bg-primary)',
-        animation: isMobile ? 'mobileSlideIn 0.22s ease' : 'none',
+        animation: isMobile ? 'md-reader-enter var(--md-sys-motion-fast-spatial-standard)' : 'none',
       }}
     >
-      {isMobile && <style>{`@keyframes mobileSlideIn { from { transform: translateX(100%) } to { transform: translateX(0) } }`}</style>}
 
       {/* Back bar: on a phone, and in List first (#596) */}
       {(isMobile || listFirst) && !windowMode && (
-        <div style={{
+        <div className="material-reader-back-bar" style={{
           display: 'flex', alignItems: 'center', gap: 8,
           paddingTop: isMobile ? 'calc(var(--sat) + 10px)' : 10,
           paddingBottom: 'calc(10px - var(--sat-trim))', paddingLeft: 14, paddingRight: 14,
@@ -1325,7 +1329,7 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
           boxShadow: paneScrolled ? '0 1px 10px rgba(0,0,0,0.2)' : 'none',
           transition: 'box-shadow 0.2s ease',
         }}>
-          <MaterialButton variant="text"
+          <MaterialButton variant="text" data-reader-back="" aria-label={t('common.back')}
             onClick={closeOpenMessage}
             style={{
               background: 'none', border: 'none', color: 'var(--accent)',
@@ -1334,7 +1338,7 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
             }}
           >
             <MaterialIcon name="chevron_left" />
-            {t('common.back')}
+            <span>{t('common.back')}</span>
           </MaterialButton>
           <div style={{
             flex: 1, minWidth: 0,
@@ -1372,17 +1376,13 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
         </div>
       )}
 
-      {/* Toolbar, always pinned at top, never scrolls. The buttons are MessageActions', which every
-          message of a conversation shares (#650). On a phone each is a 44 px touch target, edge to edge,
-          giving way down to TOUCH_MIN when a larger font size leaves the row too narrow.
-          A labeled group of plain buttons, each its own Tab stop, rather than role="toolbar", which
-          promises arrow-key movement between them that the pane has never had. */}
-      <div className="material-reader-toolbar" role="group" aria-label={t('shortcuts.groups.messageActions')} style={{
-        padding: isMobile ? '0 8px' : '8px 16px', borderBottom: '1px solid var(--border-subtle)',
-        display: 'flex', alignItems: 'center', gap: isMobile ? 0 : 6, flexShrink: 0,
-        boxShadow: paneScrolled ? '0 1px 10px rgba(0,0,0,0.2)' : 'none',
-        transition: 'box-shadow 0.2s ease',
-      }}>
+      <div className="material-reader-toolbar" data-compact={isMobile || undefined}
+        role="group" aria-label={t('shortcuts.groups.messageActions')} style={{
+          padding: isMobile ? '0 8px' : '8px 16px', borderBottom: '1px solid var(--border-subtle)',
+          display: 'flex', alignItems: 'center', gap: isMobile ? 0 : 6, flexShrink: 0,
+          boxShadow: paneScrolled ? '0 1px 10px rgba(0,0,0,0.2)' : 'none',
+          transition: 'box-shadow 0.2s ease',
+        }}>
         <ReplySplitButton
           key={`reply-${message.id}-${menuEpoch}`}
           defaultReplyAll={defaultReplyAll}
@@ -1397,21 +1397,20 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
           </ActionBtn>
         )}
 
-        <ActionBtn onClick={handleForward} label={t('message.forward')} title={withShortcut(t('message.forward'), 'forward')} touch={isMobile}>
+        {!isMobile && <ActionBtn onClick={handleForward} label={t('message.forward')} title={withShortcut(t('message.forward'), 'forward')}>
           <ForwardIcon />
-        </ActionBtn>
+        </ActionBtn>}
 
         <ActionBtn onClick={handleArchive} label={t('message.archive')} title={withShortcut(t('message.archive'), 'archive')} touch={isMobile}>
           <ArchiveIcon />
         </ActionBtn>
 
         {/* Move to folder */}
-        <div style={{ position: 'relative', display: 'flex', ...(isMobile ? { minWidth: TOUCH_MIN } : {}) }} ref={moveBtnRef}>
-          <ActionBtn onClick={handleOpenMovePicker} label={t('contextMenu.moveToFolder')} touch={isMobile} popup expanded={showMovePicker}>
+        {!isMobile && <div style={{ position: 'relative', display: 'flex' }}>
+          <ActionBtn onClick={handleOpenMovePicker} label={t('contextMenu.moveToFolder')} popup expanded={showMovePicker}>
             <MoveIcon />
           </ActionBtn>
-          {/* Desktop dropdown */}
-          {showMovePicker && !isMobile && (<>
+          {showMovePicker && (<>
             <div onClick={() => setShowMovePicker(false)} aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 199 }} />
             <div style={{
               position: 'absolute', top: 'calc(100% + 4px)', left: 0,
@@ -1485,20 +1484,22 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
               )}
             </div>
           </>)}
-        </div>
+        </div>}
 
         <div style={{ flex: 1 }} />
 
         {/* Keyed by message, so a menu left open does not carry over to the next one. */}
         <MessageTools key={`tools-${message.id}-${menuEpoch}`} isMobile={isMobile} items={toolItems} ai={aiTools} />
 
-        <ActionBtn onClick={handleStarToggle} label={t('message.star')} pressed={Boolean(message.is_starred)} touch={isMobile}>
-          <StarIcon filled={message.is_starred} />
-        </ActionBtn>
+        {!isMobile && <>
+          <ActionBtn onClick={handleStarToggle} label={t('message.star')} pressed={Boolean(message.is_starred)}>
+            <StarIcon filled={message.is_starred} />
+          </ActionBtn>
 
-        <ActionBtn onClick={handleDelete} label={t('message.delete')} danger touch={isMobile}>
-          <TrashIcon />
-        </ActionBtn>
+          <ActionBtn onClick={handleDelete} label={t('message.delete')} danger>
+            <TrashIcon />
+          </ActionBtn>
+        </>}
       </div>
 
       {/* Swiping between messages on a phone (#229): the next and previous rows of the list, opened
@@ -1759,7 +1760,7 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
             borderRadius: '16px 16px 0 0',
             boxShadow: '0 -4px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.04)',
             paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)',
-            animation: 'sheet-enter 0.2s cubic-bezier(0.34,1.56,0.64,1)',
+            animation: 'sheet-enter var(--md-sys-motion-default-spatial)',
           }}>
             <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0 4px' }}>
               <div style={{ width: 36, height: 4, borderRadius: 'var(--md-sys-shape-corner-extra-small)', background: 'var(--border)' }} />

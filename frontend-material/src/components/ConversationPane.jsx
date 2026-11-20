@@ -25,7 +25,7 @@ import ContextMenu from './ContextMenu.jsx';
 import { takeSwipeConversation } from '../utils/swipeConversation.js';
 import { applyReadGuard } from '../utils/pendingReads.js';
 import { applyDeleteGuard } from '../utils/pendingDeletes.js';
-import { ActionBtn, ArchiveIcon, MoveIcon, SnoozeIcon, SpamIcon, PrintIcon, TrashIcon, useShortcutTitle } from './MessageActions.jsx';
+import { ActionBtn, MessageTools, ArchiveIcon, MoveIcon, SnoozeIcon, SpamIcon, PrintIcon, TrashIcon, useShortcutTitle } from './MessageActions.jsx';
 import { PluginSlot } from '../plugins/PluginSlot.jsx';
 
 // What the reader is told when an action finds nothing to take (runAction below). In the unified
@@ -305,12 +305,12 @@ export default function ConversationPane({ threadId, folder, unified = false, ac
   const headerContext = { message: headerMessage, account: accounts.find(account => account.id === headerMessage?.account_id) };
   const hasBackBar = isMobile || listFirst;
   const mobileBackBar = hasBackBar && (
-    <div style={{
+    <div className="material-reader-back-bar" style={{
       display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8,
       paddingTop: isMobile ? 'calc(var(--sat) + 10px)' : 10, paddingBottom: 'calc(10px - var(--sat-trim))', paddingLeft: 14, paddingRight: 14,
       borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)', flexShrink: 0,
     }}>
-      <MaterialButton variant="text"
+      <MaterialButton variant="text" data-reader-back="" aria-label={t('common.back')}
         onClick={closeOpenMessage}
         style={{
           background: 'none', border: 'none', color: 'var(--accent)',
@@ -319,7 +319,7 @@ export default function ConversationPane({ threadId, folder, unified = false, ac
         }}
       >
         <MaterialIcon name="chevron_left" />
-        {t('common.back')}
+        <span>{t('common.back')}</span>
       </MaterialButton>
       <div style={{
         flex: '1 1 120px', minWidth: 0,
@@ -358,7 +358,7 @@ export default function ConversationPane({ threadId, folder, unified = false, ac
           so the reader does not file the same thread message by message. The reading pane's buttons,
           in its order and pinned at the top as its toolbar is (#650); snooze, which the reading pane
           keeps in its menu, sits with the other ways of putting the conversation away. */}
-      <div className="material-reader-toolbar" role="group" aria-label={t('message.conversationActions')} style={{
+      <div className="material-reader-toolbar" data-compact={isMobile || undefined} role="group" aria-label={t('message.conversationActions')} style={{
         padding: isMobile ? '0 8px' : '8px 16px', borderBottom: '1px solid var(--border-subtle)',
         display: 'flex', alignItems: 'center', gap: isMobile ? 0 : 6, flexShrink: 0,
         background: 'var(--bg-primary)',
@@ -374,15 +374,21 @@ export default function ConversationPane({ threadId, folder, unified = false, ac
         </ActionBtn>
         {!hasBackBar && headerMessage && <PluginSlot name="message-header-meta" ctx={headerContext} />}
         <div style={{ flex: 1 }} />
-        <ActionBtn onClick={() => runAction('spam', spamThread)} label={t('contextMenu.markAsSpam')} touch={isMobile}>
-          <SpamIcon />
-        </ActionBtn>
-        <ActionBtn onClick={printConversation} label={t('message.printConversation')} touch={isMobile}>
-          <PrintIcon />
-        </ActionBtn>
-        <ActionBtn onClick={() => runAction('delete', deleteThread)} label={t('message.delete')} danger touch={isMobile}>
-          <TrashIcon />
-        </ActionBtn>
+        {isMobile ? <MessageTools key={threadId} isMobile items={[
+          { key: 'spam', label: t('contextMenu.markAsSpam'), icon: <SpamIcon />, onClick: () => runAction('spam', spamThread) },
+          { key: 'print', label: t('message.printConversation'), icon: <PrintIcon />, onClick: printConversation },
+          { key: 'delete', label: t('message.delete'), icon: <TrashIcon />, danger: true, onClick: () => runAction('delete', deleteThread) },
+        ]} /> : <>
+          <ActionBtn onClick={() => runAction('spam', spamThread)} label={t('contextMenu.markAsSpam')} touch={isMobile}>
+            <SpamIcon />
+          </ActionBtn>
+          <ActionBtn onClick={printConversation} label={t('message.printConversation')} touch={isMobile}>
+            <PrintIcon />
+          </ActionBtn>
+          <ActionBtn onClick={() => runAction('delete', deleteThread)} label={t('message.delete')} danger touch={isMobile}>
+            <TrashIcon />
+          </ActionBtn>
+        </>}
       </div>
 
       {picker && (

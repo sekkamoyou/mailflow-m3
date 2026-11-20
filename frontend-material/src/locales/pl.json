@@ -2206,6 +2206,8 @@
     "addEmail": "Dodaj adres e-mail",
     "addPhone": "Dodaj telefon",
     "fields": {
+      "emailType": "Typ adresu e-mail",
+      "phoneType": "Typ telefonu",
       "displayName": "Nazwa wyświetlana",
       "firstName": "Imię",
       "lastName": "Nazwisko",
@@ -2464,6 +2466,8 @@
     "createAppPassword": "Utwórz hasło aplikacji"
   },
   "material": {
+    "folderPane": "Foldery poczty",
+    "rightPane": "Prawy panel boczny",
     "navigation": "Nawigacja główna",
     "mail": "Poczta",
     "themes": {

@@ -146,3 +146,28 @@ test('active native date/time fields use only supported ARIA attributes', async 
     await React.act(async () => root.unmount()); root = null;
   }
 });
+
+
+test('a viewport too narrow for seven touch targets opens with a focused date field', async () => {
+  const original = window.matchMedia;
+  window.matchMedia = () => ({ matches: true });
+  try {
+    let saved;
+    await render({
+      type: 'date', required: true, defaultValue: '2028-02-28', min: '2028-02-28',
+      onChange: event => { saved = event.target.value; },
+    });
+    const trigger = document.querySelector('.md-date-field > button');
+    trigger.focus();
+    await open();
+    const input = document.querySelector('.md-picker-date-text input');
+    assert.equal(document.activeElement, input);
+    assert.equal(document.querySelector('[data-date]'), null);
+    await change(input, '2028-02-29');
+    await React.act(async () => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    assert.equal(saved, '2028-02-29');
+    assert.equal(document.activeElement, trigger);
+  } finally {
+    window.matchMedia = original;
+  }
+});

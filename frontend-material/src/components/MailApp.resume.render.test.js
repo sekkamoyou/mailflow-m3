@@ -19,7 +19,7 @@ import { JSDOM } from 'jsdom';
 import { transform } from 'sucrase';
 
 const STUBS = {
-  '/components/Sidebar.jsx': 'export default function Sidebar() { return null; }',
+  '/components/Sidebar.jsx': 'import React from "react"; export default function Sidebar({ expandedRail }) { return React.createElement("div", { "data-expanded-rail": expandedRail ? "true" : undefined }); }',
   '/components/MessageList.jsx': 'import React from "react"; export default function MessageList() { return React.createElement("div", { "data-list-stub": "" }); }',
   '/components/ReadingPane.jsx': 'import React from "react"; export default function ReadingPane() { return React.createElement("div", { "data-reader-stub": "" }); }',
   '/components/NotificationToasts.jsx': 'export default function NotificationToasts() { return null; }',
@@ -152,18 +152,31 @@ describe('MailApp: returning to the tab', () => {
   });
 });
 
-test('mobile has no persistent navigation while desktop keeps its three destinations', async () => {
+test('compact views have two primary destinations, the medium rail adds settings and folders, and desktop expands the rail', async () => {
   const width = window.innerWidth;
+  const mountAt = async width => {
+    await React.act(async () => root.render(null));
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    await React.act(async () => root.render(React.createElement(MailApp)));
+  };
   try {
-    await React.act(async () => root.render(null));
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 416 });
-    await React.act(async () => root.render(React.createElement(MailApp)));
-    assert.equal(document.querySelector('.material-navigation'), null);
-    assert.equal(document.querySelector('.material-app-header'), null);
-    await React.act(async () => root.render(null));
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
-    await React.act(async () => root.render(React.createElement(MailApp)));
-    assert.equal(document.querySelectorAll('.material-app-header .material-navigation button').length, 3);
+    await mountAt(416);
+    const bar = '.material-app-inner[data-primary-view] > .material-navigation[data-layout=bar]';
+    assert.equal(document.querySelectorAll(bar + ' button').length, 2);
+    assert.equal(Boolean(document.querySelector('.material-app-header')), false);
+    await React.act(async () => useStore.getState().setSelectedMessage('reader-message'));
+    assert.equal(Boolean(document.querySelector(bar)), false);
+    await React.act(async () => useStore.getState().setSelectedMessage(null));
+
+    await mountAt(700);
+    const rail = '.material-workspace > .material-navigation[data-layout=rail]';
+    assert.equal(document.querySelectorAll(rail + ' button').length, 4);
+    assert.equal(Boolean(document.querySelector(rail + ' [aria-controls=material-folder-pane]')), true);
+
+    await mountAt(1280);
+    assert.equal(Boolean(document.querySelector(rail)), false);
+    assert.equal(Boolean(document.querySelector('#material-folder-pane [data-expanded-rail=true]')), true);
+    assert.equal(Boolean(document.querySelector('.material-app-header [aria-controls=material-folder-pane]')), true);
   } finally { Object.defineProperty(window, 'innerWidth', { configurable: true, value: width }); }
 });
 

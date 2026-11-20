@@ -2187,6 +2187,8 @@
     "addEmail": "Agregar email",
     "addPhone": "Agregar teléfono",
     "fields": {
+      "emailType": "Tipo de correo electrónico",
+      "phoneType": "Tipo de teléfono",
       "displayName": "Nombre para mostrar",
       "firstName": "Nombre",
       "lastName": "Apellido",
@@ -2445,6 +2447,8 @@
     "createAppPassword": "Crear una contraseña de aplicación"
   },
   "material": {
+    "folderPane": "Carpetas de correo",
+    "rightPane": "Barra lateral derecha",
     "navigation": "Navegación principal",
     "mail": "Correo",
     "themes": {

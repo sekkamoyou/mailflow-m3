@@ -844,6 +844,8 @@
     "addEmail": "Přidat e-mail",
     "addPhone": "Přidat telefon",
     "fields": {
+      "emailType": "Typ e-mailu",
+      "phoneType": "Typ telefonního čísla",
       "displayName": "Zobrazované jméno",
       "firstName": "Jméno",
       "lastName": "Příjmení",
@@ -2464,6 +2466,8 @@
     "createAppPassword": "Vytvořit heslo aplikace"
   },
   "material": {
+    "folderPane": "Složky pošty",
+    "rightPane": "Pravý postranní panel",
     "navigation": "Hlavní navigace",
     "mail": "Pošta",
     "themes": {

@@ -133,20 +133,6 @@ body, #root {
   user-select: none;
 }
 
-/* Notification toast */
-@keyframes toast-in {
-  from { opacity: 0; transform: translateX(100%); }
-  to { opacity: 1; transform: translateX(0); }
-}
-
-@keyframes toast-out {
-  from { opacity: 1; transform: translateX(0); }
-  to { opacity: 0; transform: translateX(100%); }
-}
-
-.toast-enter { animation: toast-in 0.2s ease forwards; }
-.toast-exit { animation: toast-out 0.2s ease forwards; }
-
 /* Generic fade-in */
 @keyframes fade-in {
   from { opacity: 0; }
@@ -182,34 +168,6 @@ body, #root {
   to   { transform: translateY(0); }
 }
 
-/* Mobile toast (slides up, no sideways) */
-@keyframes toast-in-mobile {
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes toast-out-mobile {
-  from { opacity: 1; transform: translateY(0); }
-  to   { opacity: 0; transform: translateY(12px); }
-}
-.toast-enter-mobile { animation: toast-in-mobile 0.2s ease forwards; }
-.toast-exit-mobile  { animation: toast-out-mobile 0.2s ease forwards; }
-
-/* Inline action bar (undo-able actions: delete, archive, move) */
-@keyframes action-bar-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes action-bar-out {
-  from { opacity: 1; transform: translateY(0); }
-  to   { opacity: 0; transform: translateY(8px); }
-}
-@keyframes action-bar-progress {
-  from { width: 100%; }
-  to   { width: 0%; }
-}
-.action-bar-enter { animation: action-bar-in  0.2s ease forwards; }
-.action-bar-exit  { animation: action-bar-out 0.2s ease forwards; }
-
 /* Skeleton loader shimmer */
 @keyframes skeleton-shimmer {
   0%   { background-position: -400px 0; }
@@ -234,10 +192,10 @@ body, #root {
 }
 
 /* Button press physics — add class "btn-press" to interactive buttons */
-.btn-press {
+.btn-press:not(.md-button) {
   transition: transform 0.08s ease, opacity 0.08s ease;
 }
-.btn-press:active {
+.btn-press:not(.md-button):active {
   transform: scale(0.95);
   opacity: 0.85;
 }

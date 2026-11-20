@@ -1,5 +1,5 @@
 // Render test for what a screen reader hears of notifications (design 5.4): each new one once,
-// errors through role="alert" and the rest through role="status", and the toasts and Undo bars
+// errors through role="alert" and the rest through role="status", and the snackbar
 // themselves not live regions, so nothing is read twice.
 //
 // Mounted the way ScheduledList.render.test.js mounts the Scheduled view.
@@ -58,7 +58,6 @@ const React = await import('react');
 const { createRoot } = await import('react-dom/client');
 const { useStore } = await import('../store/index.js');
 const NotificationToasts = (await import('./NotificationToasts.jsx')).default;
-const UndoBar = (await import('./UndoBar.jsx')).default;
 
 let root = null;
 async function mount({ mobile = false } = {}) {
@@ -98,21 +97,16 @@ test('a notice is said politely, an error assertively, each once, with its body'
   assert.equal(said('status').length, 2);
 });
 
-test('an Undo notice is said even where a list draws it, and no toast is a live region', async () => {
+test('an Undo notice is said once and the snackbar is not a live region', async () => {
   await mount();
   await add({ title: 'Sending "Q4 numbers"', onUndo: () => {}, undoMs: 10_000 });
   assert.deepEqual(said('status'), ['Sending "Q4 numbers"']);
   const live = [...document.querySelectorAll('[role="status"], [role="alert"], [aria-live]')];
   assert.deepEqual(live.map(el => el.dataset.announce), ['status', 'alert'], 'only the two regions');
-  await React.act(async () => { root.unmount(); });
-  root = createRoot(document.getElementById('root'));
-  await React.act(async () => {
-    root.render(React.createElement(UndoBar, { notification: { title: 'Deleted', onUndo: () => {} }, onDismiss: () => {} }));
-  });
-  assert.equal(document.querySelectorAll('[role="status"], [role="alert"], [aria-live]').length, 0, 'the Undo bar is not one');
+
 });
 
-test('on a phone the action bars and toasts are said the same way', async () => {
+test('on a phone notices use the same live regions', async () => {
   await mount({ mobile: true });
   await add({ title: 'Deleted', onUndo: () => {} });
   await add({ type: 'error', title: 'Could not restore it' });
@@ -121,20 +115,48 @@ test('on a phone the action bars and toasts are said the same way', async () => 
   assert.deepEqual([...document.querySelectorAll('[role="status"], [role="alert"]')].map(el => el.dataset.announce), ['status', 'alert']);
 });
 
-test('toast and Undo actions stay in their own row without taking the copy or dismiss slot', async () => {
+const snackbar = () => document.querySelector('.material-snackbar');
+const action = () => snackbar().querySelector('.md-snackbar-action');
+const dismiss = () => snackbar().querySelector('.md-snackbar-close');
+
+test('one snackbar shows at a time, keeping the earlier Undo available within its original window', async () => {
   await mount({ mobile: true });
-  let actions = 0, undone = 0;
-  await add({ title: 'Long title', body: 'Long body', persistent: true, onAction: () => actions++, actionLabel: 'Retry' });
-  await add({ title: 'Moved', onUndo: () => undone++, undoMs: 120000 });
-  const toast = document.querySelector('.md-toast');
-  assert.equal(toast.querySelector('.md-toast-copy').textContent, 'Long titleLong body');
-  assert.equal(toast.querySelector('.md-toast-copy button'), null);
-  assert.ok(toast.querySelector(':scope > .md-snackbar-close'));
-  await React.act(async () => toast.querySelector('.md-snackbar-actions button').click());
-  const undo = document.querySelector('.md-action-snackbar');
-  assert.ok(undo.querySelector(':scope > .md-snackbar-title'));
-  assert.ok(undo.querySelector(':scope > .md-snackbar-close'));
-  await React.act(async () => undo.querySelector('.md-snackbar-actions button').click());
-  assert.equal(actions, 1);
+  let undone = 0;
+  await add({ title: 'Important', persistent: true, onAction: () => {}, actionLabel: 'Retry' });
+  await add({ title: 'Moved', onUndo: () => undone++ });
+  const firstExpiry = useStore.getState().notifications[0].undoExpiresAt;
+  await add({ title: 'Archived', onUndo: () => {} });
+  assert.equal(document.querySelectorAll('.material-snackbar').length, 1);
+  assert.equal(snackbar().querySelector('.md-snackbar-copy').textContent, 'Archived');
+  await React.act(async () => dismiss().click());
+  assert.equal(snackbar().querySelector('.md-snackbar-copy').textContent, 'Moved');
+  assert.equal(useStore.getState().notifications[0].undoExpiresAt, firstExpiry);
+  await React.act(async () => action().click());
   assert.equal(undone, 1);
+  assert.equal(action().textContent, 'Retry');
+});
+
+test('undo deadlines use the standard window and preserve an explicit hold', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: 100 });
+  await mount();
+  await add({ title: 'Standard', onUndo: () => {} });
+  await add({ title: 'Held send', onUndo: () => {}, undoMs: 9876 });
+  assert.deepEqual(useStore.getState().notifications.map(n => n.undoExpiresAt), [9976, 4600]);
+});
+
+test('expired Undo offers View without announcing the same notice again', async () => {
+  await mount();
+  let views = 0;
+  await add({ title: 'Scheduled', body: 'Q4 numbers', onUndo: () => assert.fail('stale undo'), onAction: () => views++ });
+  assert.equal(action().textContent, 'common.undo');
+  await React.act(async () => {
+    useStore.setState(state => ({ notifications: state.notifications.map(n => ({ ...n, undoExpiresAt: Date.now() - 1 })) }));
+  });
+  await React.act(async () => new Promise(resolve => setTimeout(resolve, 5)));
+  assert.equal(snackbar().querySelector('.md-snackbar-copy').textContent, 'ScheduledQ4 numbers');
+  assert.equal(action().textContent, 'common.view');
+  assert.deepEqual(said('status'), ['Scheduled. Q4 numbers']);
+  await React.act(async () => action().click());
+  assert.equal(views, 1);
+  assert.equal(snackbar(), null);
 });

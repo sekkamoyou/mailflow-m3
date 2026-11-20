@@ -2187,6 +2187,8 @@
     "addEmail": "E-Mail hinzufügen",
     "addPhone": "Telefon hinzufügen",
     "fields": {
+      "emailType": "E-Mail-Typ",
+      "phoneType": "Telefontyp",
       "displayName": "Anzeigename",
       "firstName": "Vorname",
       "lastName": "Nachname",
@@ -2445,6 +2447,8 @@
     "createAppPassword": "App-Passwort erstellen"
   },
   "material": {
+    "folderPane": "E-Mail-Ordner",
+    "rightPane": "Rechte Seitenleiste",
     "navigation": "Hauptnavigation",
     "mail": "E-Mail",
     "themes": {

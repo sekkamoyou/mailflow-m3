@@ -1,6 +1,6 @@
 import { MaterialIcon } from '../material/controls.jsx';
 import { MaterialButton, MaterialInput, MaterialSelect, MaterialTextarea } from '../material/controls.jsx';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useId, useLayoutEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../utils/api.js';
 import { useStore } from '../store/index.js';
@@ -24,7 +24,7 @@ function Avatar({ name, email, size = 36, hasContactPhoto }) {
   const label = (name || email || '?').charAt(0).toUpperCase();
   const color  = avatarColor(name || email || '');
   return (
-    <div style={{
+    <span aria-hidden="true" style={{
       width: size, height: size, borderRadius: '50%',
       background: color + '22', border: `1.5px solid ${color}55`,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -34,7 +34,7 @@ function Avatar({ name, email, size = 36, hasContactPhoto }) {
     }}>
       {label}
       <SenderAvatarImage email={email} hasContactPhoto={hasContactPhoto} />
-    </div>
+    </span>
   );
 }
 
@@ -77,6 +77,25 @@ export default function ContactsPage() {
   // Mobile: 'list' shows the contact list, 'detail' shows contact/form panel
   const [mobilePanel, setMobilePanel] = useState('list');
   const searchTimer                 = useRef(null);
+  const mobileBack = useRef(null);
+  const mobileAdd = useRef(null);
+  const contactList = useRef(null);
+  const returnContact = useRef(null);
+  const previousPanel = useRef(mobilePanel);
+
+  useLayoutEffect(() => {
+    const changed = previousPanel.current !== mobilePanel;
+    previousPanel.current = mobilePanel;
+    if (!isMobile || !changed) return;
+    if (mobilePanel === 'detail') {
+      mobileBack.current?.focus({ preventScroll: true });
+    } else {
+      const rows = contactList.current?.querySelectorAll('[data-contact-id]');
+      const row = Array.from(rows || []).find(item => item.dataset.contactId === returnContact.current);
+      if (row) row.focus();
+      else mobileAdd.current?.focus({ preventScroll: true });
+    }
+  }, [isMobile, mobilePanel]);
 
   // Stable refs used inside scroll handler to avoid stale closures.
   const contactsRef    = useRef([]);
@@ -140,7 +159,7 @@ export default function ContactsPage() {
       setShowNew(false);
       setConfirmDelete(false);
       setError(null);
-      if (isMobile) setMobilePanel('detail');
+      if (isMobile) { returnContact.current = c.id; setMobilePanel('detail'); }
     } catch (err) {
       setError(err.message);
     }
@@ -153,7 +172,7 @@ export default function ContactsPage() {
     setShowNew(true);
     setConfirmDelete(false);
     setError(null);
-    if (isMobile) setMobilePanel('detail');
+    if (isMobile) { returnContact.current = null; setMobilePanel('detail'); }
   };
 
   const goBackToList = () => {
@@ -277,7 +296,7 @@ export default function ContactsPage() {
   const listPanel = (
     <>
       {/* List */}
-      <div style={{ flex: 1, overflowY: 'auto' }} onScroll={handleListScroll}>
+      <div ref={contactList} style={{ flex: 1, overflowY: 'auto' }} onScroll={handleListScroll}>
         {loading && !contacts.length && (
           <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 'var(--md-sys-typescale-body-medium-size)' }}>
             {t('common.loading')}
@@ -289,7 +308,8 @@ export default function ContactsPage() {
           </div>
         )}
         {contacts.map(c => (
-          <div data-md-state=""
+          <button type="button" className="md-contact-row" data-md-state="" data-contact-id={c.id}
+            aria-current={selected?.id === c.id ? true : undefined}
             key={c.id}
             onClick={() => selectContact(c)}
             style={{
@@ -307,32 +327,32 @@ export default function ContactsPage() {
               size={34}
               hasContactPhoto={c.has_contact_photo}
             />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{
-                fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)',
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{
+                display: 'block', fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, color: 'var(--text-primary)',
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               }}>
                 {c.display_name || c.primary_email}
-              </div>
+              </span>
               {c.display_name && c.primary_email && (
-                <div style={{
-                  fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)',
+                <span style={{
+                  display: 'block', fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)',
                   whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 }}>
                   {c.primary_email}
-                </div>
+                </span>
               )}
-            </div>
+            </span>
             {c.is_auto && (
-              <div style={{
-                fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)',
+              <span style={{
+                display: 'block', fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)',
                 background: 'var(--bg-tertiary)', borderRadius: 'var(--md-sys-shape-corner-extra-small)',
                 padding: '1px 5px', flexShrink: 0,
               }}>
                 {t('contacts.auto')}
-              </div>
+              </span>
             )}
-          </div>
+          </button>
         ))}
         {loadingMore && (
           <div style={{ padding: '10px 14px', textAlign: 'center', fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)' }}>
@@ -427,7 +447,7 @@ export default function ContactsPage() {
           borderBottom: '1px solid var(--border-subtle)',
           background: 'var(--bg-secondary)', flexShrink: 0,
         }}>
-          <MaterialButton variant="icon"
+          <MaterialButton variant="icon" ref={mobileBack} aria-label={t('common.back')}
             onClick={mobilePanel === 'detail' ? goBackToList : () => setShowContacts(false)}
             style={{
               background: 'none', border: 'none', color: 'var(--text-secondary)',
@@ -448,7 +468,7 @@ export default function ContactsPage() {
           </h2>
 
           {mobilePanel === 'list' && (
-            <MaterialButton variant="icon"
+            <MaterialButton variant="icon" ref={mobileAdd} aria-label={t('contacts.newContact')}
               onClick={startNew}
               style={{
                 background: 'none', border: 'none', color: 'var(--accent)',
@@ -648,6 +668,7 @@ function ContactForm({
   onSetPhone, onAddPhone, onRemovePhone,
   onSave, onCancel, t,
 }) {
+  const id = useId();
   const inputStyle = {
     width: '100%', boxSizing: 'border-box',
     padding: '8px 10px', borderRadius: 7,
@@ -658,57 +679,58 @@ function ContactForm({
   const labelStyle = { fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 4, display: 'block' };
 
   return (
-    <div style={{ width: '100%', maxWidth: 560, animation: 'pane-fade-in var(--motion-normal) var(--ease-emphasized) both' }}>
+    <div className="md-contact-form" style={{ width: '100%', maxWidth: 560, animation: 'pane-fade-in var(--motion-normal) var(--ease-emphasized) both' }}>
       <h2 style={{ margin: '0 0 24px', fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)' }}>
         {isNew ? t('contacts.newContact') : t('contacts.editContact')}
       </h2>
 
       {error && <ErrorBanner msg={error} />}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginBottom: 12 }}>
         <div>
-          <label style={labelStyle}>{t('contacts.fields.firstName')}</label>
-          <MaterialInput style={inputStyle} value={form.firstName} onChange={e => onField('firstName', e.target.value)} />
+          <label htmlFor={`${id}-firstName`} style={labelStyle}>{t('contacts.fields.firstName')}</label>
+          <MaterialInput id={`${id}-firstName`} style={inputStyle} value={form.firstName} onChange={e => onField('firstName', e.target.value)} />
         </div>
         <div>
-          <label style={labelStyle}>{t('contacts.fields.lastName')}</label>
-          <MaterialInput style={inputStyle} value={form.lastName} onChange={e => onField('lastName', e.target.value)} />
+          <label htmlFor={`${id}-lastName`} style={labelStyle}>{t('contacts.fields.lastName')}</label>
+          <MaterialInput id={`${id}-lastName`} style={inputStyle} value={form.lastName} onChange={e => onField('lastName', e.target.value)} />
         </div>
       </div>
 
       <div style={{ marginBottom: 12 }}>
-        <label style={labelStyle}>{t('contacts.fields.displayName')}</label>
-        <MaterialInput style={inputStyle} value={form.displayName} onChange={e => onField('displayName', e.target.value)} />
+        <label htmlFor={`${id}-displayName`} style={labelStyle}>{t('contacts.fields.displayName')}</label>
+        <MaterialInput id={`${id}-displayName`} style={inputStyle} value={form.displayName} onChange={e => onField('displayName', e.target.value)} />
       </div>
 
       <div style={{ marginBottom: 12 }}>
-        <label style={labelStyle}>{t('contacts.fields.organization')}</label>
-        <MaterialInput style={inputStyle} value={form.organization} onChange={e => onField('organization', e.target.value)} />
+        <label htmlFor={`${id}-organization`} style={labelStyle}>{t('contacts.fields.organization')}</label>
+        <MaterialInput id={`${id}-organization`} style={inputStyle} value={form.organization} onChange={e => onField('organization', e.target.value)} />
       </div>
 
       {/* Emails */}
       <div style={{ marginBottom: 12 }}>
-        <label style={labelStyle}>{t('contacts.fields.email')}</label>
+        <label htmlFor={`${id}-email-0`} style={labelStyle}>{t('contacts.fields.email')}</label>
         {form.emails.map((e, i) => (
-          <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+          <div key={i} className="md-contact-method">
             <MaterialInput
-              style={{ ...inputStyle, flex: 1 }}
+              id={`${id}-email-${i}`}
+              aria-label={i > 0 ? `${t('contacts.fields.email')} ${i + 1}` : undefined}
+              style={{ ...inputStyle, flex: 1, minWidth: 0 }}
               type="email"
               value={e.value}
               placeholder="email@example.com"
               onChange={ev => onSetEmail(i, 'value', ev.target.value)}
             />
-            <MaterialSelect
+            <MaterialSelect className="md-contact-kind" aria-label={`${t('contacts.fields.emailType')} ${i + 1}`}
               value={e.type}
               onChange={ev => onSetEmail(i, 'type', ev.target.value)}
-              style={{ ...inputStyle, width: 80, padding: '8px 6px' }}
             >
               <option value="other">{t('contacts.emailTypes.other')}</option>
               <option value="work">{t('contacts.emailTypes.work')}</option>
               <option value="home">{t('contacts.emailTypes.home')}</option>
             </MaterialSelect>
             {form.emails.length > 1 && (
-              <MaterialButton variant="icon" onClick={() => onRemoveEmail(i)} style={removeBtn}>
+              <MaterialButton variant="icon" aria-label={`${t('common.remove')}: ${t('contacts.fields.email')} ${i + 1}`} onClick={() => onRemoveEmail(i)} style={removeBtn}>
                 <MaterialIcon name="close" />
               </MaterialButton>
             )}
@@ -719,27 +741,28 @@ function ContactForm({
 
       {/* Phones */}
       <div style={{ marginBottom: 12 }}>
-        <label style={labelStyle}>{t('contacts.fields.phone')}</label>
+        <label htmlFor={`${id}-phone-0`} style={labelStyle}>{t('contacts.fields.phone')}</label>
         {form.phones.map((p, i) => (
-          <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+          <div key={i} className="md-contact-method">
             <MaterialInput
-              style={{ ...inputStyle, flex: 1 }}
+              id={`${id}-phone-${i}`}
+              aria-label={i > 0 ? `${t('contacts.fields.phone')} ${i + 1}` : undefined}
+              style={{ ...inputStyle, flex: 1, minWidth: 0 }}
               type="tel"
               value={p.value}
               placeholder="+1 555 000 0000"
               onChange={ev => onSetPhone(i, 'value', ev.target.value)}
             />
-            <MaterialSelect
+            <MaterialSelect className="md-contact-kind" aria-label={`${t('contacts.fields.phoneType')} ${i + 1}`}
               value={p.type}
               onChange={ev => onSetPhone(i, 'type', ev.target.value)}
-              style={{ ...inputStyle, width: 90, padding: '8px 6px' }}
             >
               <option value="mobile">{t('contacts.phoneTypes.mobile')}</option>
               <option value="work">{t('contacts.phoneTypes.work')}</option>
               <option value="home">{t('contacts.phoneTypes.home')}</option>
               <option value="other">{t('contacts.phoneTypes.other')}</option>
             </MaterialSelect>
-            <MaterialButton variant="icon" onClick={() => onRemovePhone(i)} style={removeBtn}>
+            <MaterialButton variant="icon" aria-label={`${t('common.remove')}: ${t('contacts.fields.phone')} ${i + 1}`} onClick={() => onRemovePhone(i)} style={removeBtn}>
               <MaterialIcon name="close" />
             </MaterialButton>
           </div>
@@ -748,8 +771,8 @@ function ContactForm({
       </div>
 
       <div style={{ marginBottom: 24 }}>
-        <label style={labelStyle}>{t('contacts.fields.notes')}</label>
-        <MaterialTextarea
+        <label htmlFor={`${id}-notes`} style={labelStyle}>{t('contacts.fields.notes')}</label>
+        <MaterialTextarea id={`${id}-notes`}
           rows={3}
           style={{ ...inputStyle, resize: 'vertical' }}
           value={form.notes}
@@ -757,7 +780,7 @@ function ContactForm({
         />
       </div>
 
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <MaterialButton variant="filled"
           onClick={onSave}
           disabled={saving}

@@ -2187,6 +2187,8 @@
     "addEmail": "Добавить email",
     "addPhone": "Добавить телефон",
     "fields": {
+      "emailType": "Тип электронной почты",
+      "phoneType": "Тип телефона",
       "displayName": "Отображаемое имя",
       "firstName": "Имя",
       "lastName": "Фамилия",
@@ -2445,6 +2447,8 @@
     "createAppPassword": "Создать пароль приложения"
   },
   "material": {
+    "folderPane": "Папки почты",
+    "rightPane": "Правая боковая панель",
     "navigation": "Основная навигация",
     "mail": "Почта",
     "themes": {

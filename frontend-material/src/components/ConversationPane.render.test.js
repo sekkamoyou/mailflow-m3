@@ -745,7 +745,7 @@ describe('conversation actions', () => {
 });
 
 describe('conversation pane on a phone', () => {
-  // The reading pane's phone toolbar (#650): the tools in a More menu, every button a 44 px target.
+  // The reading pane's phone toolbar uses shared Material targets.
   test('a card has the reading pane\'s phone toolbar, with Material touch targets', async () => {
     const savedAppearance = { theme: useStore.getState().theme, darkEmailBodies: useStore.getState().darkEmailBodies };
     await React.act(async () => useStore.setState({ theme: 'dark', darkEmailBodies: false }));
@@ -773,12 +773,19 @@ describe('conversation pane on a phone', () => {
       // A wrapper says its minimum outright: its automatic one would count the button's 44 px.
       const moreButton = buttons.find(b => b.getAttribute('aria-label') === 'message.more');
       assert.equal(moreButton.parentElement.style.minWidth, '32px');
-      assert.equal(buttons[0].parentElement.style.minWidth, '54px', 'the reply split, both halves');
+      assert.ok(buttons[0].parentElement.matches('.md-split-button'));
+      assert.equal(buttons[1].parentElement, buttons[0].parentElement);
       const threadBar = container.querySelector('[role="group"][aria-label="message.conversationActions"]');
       assert.deepEqual([...threadBar.querySelectorAll('button')].map(b => b.getAttribute('aria-label')), [
-        'message.archive', 'contextMenu.moveToFolder', 'contextMenu.snooze.label',
+        'message.archive', 'contextMenu.moveToFolder', 'contextMenu.snooze.label', 'message.more',
+      ]);
+      const threadMore = threadBar.querySelector('[aria-label="message.more"]');
+      await React.act(async () => threadMore.click());
+      assert.deepEqual([...document.querySelectorAll('[role="menuitem"]')].map(button => button.textContent), [
         'contextMenu.markAsSpam', 'message.printConversation', 'message.delete',
       ]);
+      await React.act(async () => document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+      assert.equal(document.activeElement, threadMore);
       const more = buttons.find(b => b.getAttribute('aria-label') === 'message.more');
       assert.equal(more.getAttribute('aria-expanded'), 'false');
       await React.act(async () => { more.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); });

@@ -1,3 +1,4 @@
+import { isUndoAvailable } from '../utils/undoableAction.js';
 import { useModalFocus } from '../material/useModalFocus.js';
 import { MaterialIcon } from '../material/controls.jsx';
 import { MaterialButton } from '../material/controls.jsx';
@@ -8,7 +9,6 @@ import { api } from '../utils/api.js';
 import { useMobile } from '../hooks/useMobile.js';
 import { LAYOUTS } from '../layouts.js';
 import AccountMark from './AccountMark.jsx';
-import UndoBar from './UndoBar.jsx';
 import { ComposeQuestion, SendLaterMenu, SendLaterSheet, SendLaterIcon, trapTab } from './SendLater.jsx';
 import { shortcutBus } from '../utils/shortcutBus.js';
 import { scheduledFeed } from '../utils/scheduledFeed.js';
@@ -54,8 +54,6 @@ export default function ScheduledList() {
   const list = useStore(s => s.scheduledList);
   const accounts = useStore(s => s.accounts);
   const highlight = useStore(s => s.scheduledHighlight);
-  const notifications = useStore(s => s.notifications);
-  const removeNotification = useStore(s => s.removeNotification);
   const setMobileSidebarOpen = useStore(s => s.setMobileSidebarOpen);
   const layout = useStore(s => s.layout);
   const currentLayout = LAYOUTS[layout] || LAYOUTS.comfortable;
@@ -155,7 +153,7 @@ export default function ScheduledList() {
   useEffect(() => {
     const onUndo = () => {
       const state = useStore.getState();
-      const last = state.notifications.find(n => typeof n.onUndo === 'function');
+      const last = state.notifications.find(isUndoAvailable);
       if (!last) return;
       state.removeNotification(last.id);
       void last.onUndo();
@@ -407,11 +405,10 @@ export default function ScheduledList() {
     </Section>
   );
 
-  const undoable = notifications.filter(n => n.onUndo);
   const title = t('sidebar.scheduled');
 
   return (
-    <div data-scheduled-view="" style={{
+    <div id="material-mail-list" data-scheduled-view="" style={{
       width: isMobile || isColumn || listFirst ? '100%' : 'var(--list-width)',
       minWidth: isMobile ? undefined : (isColumn ? undefined : 180),
       flex: isMobile ? 1 : (isColumn ? '0 0 42%' : undefined),
@@ -428,7 +425,7 @@ export default function ScheduledList() {
           paddingTop: 'calc(var(--sat) + 10px)', paddingBottom: 'calc(10px - var(--sat-trim))', paddingLeft: 12, paddingRight: 12,
           borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)', flexShrink: 0,
         }}>
-          <MaterialButton variant="icon"
+          <MaterialButton variant="icon" className="material-list-menu" aria-controls="material-folder-pane"
             type="button"
             onClick={() => setMobileSidebarOpen(true)}
             aria-label={t('messageList.menu', 'Menu')}
@@ -476,10 +473,6 @@ export default function ScheduledList() {
           </>
         )}
       </div>
-
-      {!isMobile && undoable.map((n, i) => (
-        <UndoBar key={n.id} notification={n} onDismiss={() => removeNotification(n.id)} showTopBorder={i === 0} />
-      ))}
 
       {menu && !isMobile && (
         <ActionMenu row={menu.row} x={menu.x} y={menu.y} returnTo={menu.returnTo} t={t}
@@ -804,7 +797,7 @@ function ActionSheet({ row, t, subject, returnTo, onClose, onAction }) {
         style={{
           position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 2101, background: 'var(--bg-elevated)',
           borderRadius: '16px 16px 0 0', paddingBottom: 'calc((var(--sab) + 8px) / var(--ui-scale, 1))', boxShadow: 'var(--shadow-modal)',
-          animation: 'sheet-enter 0.22s var(--ease-emphasized) both', overflowY: 'auto',
+          animation: 'sheet-enter var(--md-sys-motion-default-spatial) both', overflowY: 'auto',
         }}>
         <div id={titleId} style={{
           padding: '16px 20px 10px', fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-subtle)',

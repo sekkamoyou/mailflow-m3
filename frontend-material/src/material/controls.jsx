@@ -56,13 +56,21 @@ export function MaterialIcon({ name, size = 24, className = '', style, ...props 
 export function MaterialProgress({ value, label, small = false, style, ...props }) {
   const { t } = useTranslation();
   const progress = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : undefined;
+  const active = progress === undefined ? 30 : progress * 100;
+  // The rounded caps occupy part of the path. Leave room for both caps and the visible gap.
+  const gap = 8;
+  const track = progress === 0 ? 100 : Math.max(0, 100 - active - 2 * gap);
   const decorative = props['aria-hidden'] === true || props['aria-hidden'] === 'true';
   return <span {...props} className={`md-progress${small ? ' md-progress-small' : ''}`} style={style}
     role={decorative ? undefined : 'progressbar'} aria-label={decorative ? undefined : label || t('common.loading')}
     aria-valuemin={decorative ? undefined : 0} aria-valuemax={decorative ? undefined : 100}
     aria-valuenow={decorative || progress === undefined ? undefined : Math.round(progress * 100)} data-indeterminate={progress === undefined || undefined}>
-    <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="18" pathLength="100"
-      style={progress === undefined ? undefined : { strokeDasharray: `${progress * 100} 100` }} /></svg>
+    <svg viewBox="0 0 48 48" aria-hidden="true">
+      {track > 0 && <circle className="md-progress-track" cx="24" cy="24" r="18" pathLength="100"
+        strokeDasharray={track === 100 ? undefined : `${track} 100`} strokeDashoffset={track === 100 ? undefined : -(active + gap)} />}
+      {active > 0 && <circle cx="24" cy="24" r="18" pathLength="100"
+        strokeDasharray={active === 100 ? undefined : `${active} 100`} />}
+    </svg>
   </span>;
 }
 
@@ -76,10 +84,10 @@ function ripple(button, event) {
   const y = event.type === 'pointerdown' ? event.clientY - rect.top : rect.height / 2;
   Object.assign(circle.style, { width: `${diameter}px`, height: `${diameter}px`, left: `${x - diameter / 2}px`, top: `${y - diameter / 2}px` });
   for (const animation of circle.getAnimations()) animation.cancel();
-  circle.animate([{ transform: 'scale(0)', opacity: .12 }, { transform: 'scale(1)', opacity: 0 }], { duration: 450, easing: 'cubic-bezier(.2,0,0,1)' });
+  circle.animate([{ transform: 'scale(0)', opacity: .12 }, { transform: 'scale(1)', opacity: 0 }], { duration: 200, easing: 'cubic-bezier(.34,.80,.34,1)' });
 }
 
-export const MaterialButton = forwardRef(function MaterialButton({ variant, selected, className = '', style, children, ...props }, ref) {
+export const MaterialButton = forwardRef(function MaterialButton({ variant, size, selected, className = '', style, children, ...props }, ref) {
   const { t } = useTranslation();
   const nodes = Children.toArray(children);
   const icon = nodes.find(node => isValidElement(node) && node.type === MaterialIcon);
@@ -94,7 +102,7 @@ export const MaterialButton = forwardRef(function MaterialButton({ variant, sele
   return <button {...props} ref={ref} aria-label={props['aria-label'] || (kind === 'icon' ? props.title || iconLabel || (swatch ? `${t('admin.accounts.color')} ${background}` : undefined) : undefined)}
     onPointerDown={event => { props.onPointerDown?.(event); if (event.button === 0) ripple(event.currentTarget, event); }}
     onKeyDown={event => { props.onKeyDown?.(event); if (!event.repeat && (event.key === 'Enter' || event.key === ' ')) ripple(event.currentTarget, event); }}
-    data-material="button" data-variant={kind} data-selected={active ? true : undefined}
+    data-material="button" data-variant={kind} data-size={size} data-selected={active ? true : undefined}
     data-leading-icon={!isIcon && isGraphic(nodes[0]) || undefined} data-trailing-icon={!isIcon && isGraphic(nodes.at(-1)) || undefined}
     className={`md-button ${className}`} style={layoutStyle(style, true)}>{kind === 'switch' ? <span className="md-switch-thumb" /> : swatch ? <span aria-hidden="true" className="md-color-swatch" style={{ background }} /> : children}<span aria-hidden="true" className="md-ripple"><span className="md-ripple-circle" /></span></button>;
 });
@@ -104,12 +112,14 @@ export const MaterialInput = forwardRef(function MaterialInput({ className = '',
   const selection = type === 'checkbox' || type === 'radio';
   const hidden = type === 'hidden' || type === 'file';
   const slider = type === 'range';
-  const progress = value => `${Math.max(0, Math.min(100, (Number(value) - Number(props.min ?? 0)) / (Number(props.max ?? 100) - Number(props.min ?? 0)) * 100))}%`;
+  const min = Number(props.min ?? 0);
+  const max = Number(props.max ?? 100);
+  const progress = value => `${Math.max(0, Math.min(100, (Number(value) - min) / (max - min) * 100 || 0))}%`;
   return <input {...props} ref={ref} aria-label={props['aria-label'] || (!props.id ? props.placeholder : undefined) || undefined}
     className={`${selection ? 'md-selection' : hidden ? '' : slider ? 'md-slider' : 'md-input'} ${className}`}
     data-material={selection ? type : hidden ? undefined : slider ? 'slider' : 'field'}
     onInput={event => { if (slider) event.currentTarget.style.setProperty('--md-slider-progress', progress(event.currentTarget.value)); props.onInput?.(event); }}
-    style={hidden ? style : selection ? undefined : { ...layoutStyle(style), ...(slider ? { '--md-slider-progress': progress(props.value ?? props.defaultValue ?? 50) } : {}) }} />;
+    style={hidden ? style : selection ? undefined : { ...layoutStyle(style), ...(slider ? { '--md-slider-progress': progress(props.value ?? props.defaultValue ?? (min + max) / 2) } : {}) }} />;
 });
 
 export const MaterialSelect = forwardRef(function MaterialSelect({ className = '', style, children, ...props }, ref) {

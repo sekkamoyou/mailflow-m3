@@ -75,6 +75,8 @@ describe('Material 3 theme contract', () => {
       '--md-sys-shape-corner-small', '--md-sys-shape-corner-full',
       '--md-sys-elevation-level1', '--md-sys-elevation-level5',
       '--md-sys-motion-duration-short', '--md-sys-motion-easing-standard',
+      '--md-sys-motion-fast-spatial', '--md-sys-motion-fast-effects',
+      '--md-sys-motion-default-spatial-standard', '--md-sys-typescale-label-large-emphasized-weight',
       '--md-sys-typescale-display-large-size', '--md-sys-typescale-body-medium-line-height',
     ]) assert.ok(tokens.includes(token + ':'), 'missing ' + token);
     assert.match(tokens, /prefers-reduced-motion:\s*reduce/);

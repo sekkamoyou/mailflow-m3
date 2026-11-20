@@ -1,6 +1,10 @@
 export const UNDO_WINDOW_MS = 4500;
 export const UNDO_COMMIT_DELAY_MS = UNDO_WINDOW_MS + 250;
 
+export function isUndoAvailable(notification) {
+  return typeof notification.onUndo === 'function' && Date.now() < (notification.undoExpiresAt ?? Infinity);
+}
+
 // Every action still in its undo window, by timer. Closing or reloading the tab ends the page
 // before the timers fire, and the action would never reach the server (the mail comes back next
 // time), so flushUndoables runs them at once: on pagehide, with keepalive requests, and before the

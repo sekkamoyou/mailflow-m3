@@ -2187,6 +2187,8 @@
     "addEmail": "添加邮箱",
     "addPhone": "添加电话",
     "fields": {
+      "emailType": "邮箱类型",
+      "phoneType": "电话类型",
       "displayName": "显示名称",
       "firstName": "名",
       "lastName": "姓",
@@ -2445,6 +2447,8 @@
     "createAppPassword": "创建应用专用密码"
   },
   "material": {
+    "folderPane": "邮件文件夹",
+    "rightPane": "右侧边栏",
     "navigation": "主导航",
     "mail": "邮件",
     "themes": {

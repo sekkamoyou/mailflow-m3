@@ -95,7 +95,7 @@ export default function GtdEntryRow({
           <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: 'var(--accent)' }} />
         )}
         <span style={{
-          fontSize: v.senderSize, fontWeight: unread ? 600 : v.senderReadWeight, flex: 1,
+          fontSize: v.senderSize, fontWeight: unread ? 'var(--md-sys-typescale-title-medium-emphasized-weight)' : v.senderReadWeight, flex: 1,
           color: unread ? 'var(--text-primary)' : 'var(--text-secondary)',
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         }}>
@@ -124,13 +124,14 @@ export default function GtdEntryRow({
           section-scoped actions. */}
       {trackHover && hovered && renderHoverActions()}
 
-      <div style={{
-        fontSize: v.subjectSize, marginTop: 1,
-        color: v.subjectUnreadAware && unread ? 'var(--text-primary)' : 'var(--text-secondary)',
-        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-      }}>
+      <button type="button" className="md-row-open" data-message-open={thread.id} aria-current={selected ? true : undefined}
+        style={{
+          fontSize: v.subjectSize, marginTop: 1,
+          color: v.subjectUnreadAware && unread ? 'var(--text-primary)' : 'var(--text-secondary)',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>
         {thread.subject || t('common.noSubject')}
-      </div>
+      </button>
       {/* Message preview: Mailflow's native inbox line — the gray one-liner under the
           subject — on every GTD row. A cached AI gist (Waiting rows) wins over the raw
           snippet. Always rendered (native parity): rows keep a constant height even when

@@ -2187,6 +2187,8 @@
     "addEmail": "Ajouter un e-mail",
     "addPhone": "Ajouter un téléphone",
     "fields": {
+      "emailType": "Type d’e-mail",
+      "phoneType": "Type de téléphone",
       "displayName": "Nom affiché",
       "firstName": "Prénom",
       "lastName": "Nom",
@@ -2445,6 +2447,8 @@
     "createAppPassword": "Créer un mot de passe d'application"
   },
   "material": {
+    "folderPane": "Dossiers de messagerie",
+    "rightPane": "Barre latérale droite",
     "navigation": "Navigation principale",
     "mail": "Courrier",
     "themes": {

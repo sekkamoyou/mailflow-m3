@@ -1615,6 +1615,14 @@ function IconBtn({ children, onClick, title, danger, disabled }) {
 function FontsTab() {
   const { t } = useTranslation();
   const { fontSize, setFontSize } = useStore();
+  const scaleInputRef = useRef(null);
+  // Scaling the settings viewport can push the focused control out of view.
+  useLayoutEffect(() => {
+    const input = scaleInputRef.current;
+    if (input?.matches(':focus-visible')) {
+      input.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+    }
+  }, [fontSize]);
 
   return (
     <div>
@@ -1630,7 +1638,7 @@ function FontsTab() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', minWidth: 28 }}>80%</span>
-          <MaterialInput type="range" min={80} max={130} step={5} value={fontSize} aria-label={t('admin.appearance.fontSize')} onChange={e => setFontSize(parseInt(e.target.value))} style={{ flex: 1, accentColor: 'var(--md-sys-color-primary)', cursor: 'pointer' }} />
+          <MaterialInput ref={scaleInputRef} type="range" min={80} max={130} step={5} value={fontSize} aria-valuetext={`${fontSize}%`} aria-label={t('admin.appearance.fontSize')} onChange={e => setFontSize(parseInt(e.target.value))} style={{ flex: 1, scrollMarginBlock: 8 }} />
           <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', minWidth: 32, textAlign: 'right' }}>130%</span>
         </div>
         {fontSize !== 100 && (
@@ -1826,23 +1834,17 @@ function ChoiceCards({ options, value, onChange }) {
 }
 
 // Chips wrap before their labels become cramped. Short option sets share the available width.
-function ChoiceChips({ options, isActive, onSelect, wrap = false }) {
+function ChoiceChips({ label, options, isActive, onSelect, wrap = false }) {
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+    <div className={wrap ? 'md-choice-chips' : 'md-connected-buttons'} role={label ? 'group' : undefined} aria-label={label}>
       {options.map(({ value, label }) => {
         const active = isActive(value);
         return (
-          <MaterialButton variant="chip" className="md-choice-chip"
+          <MaterialButton variant={wrap ? 'chip' : 'tonal'} className={wrap ? 'md-choice-chip' : undefined}
             key={String(value)}
             type="button"
             aria-pressed={active}
             onClick={() => onSelect(value)}
-            style={{
-              ...choiceStyle(active), height: CHIP_HEIGHT, padding: '0 12px', borderRadius: 'var(--md-sys-shape-corner-small)',
-              fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500, whiteSpace: 'nowrap',
-              flex: wrap ? '0 1 auto' : '1 1 auto',
-              color: active ? 'var(--accent)' : 'var(--text-secondary)',
-            }}
           >
             {label}
           </MaterialButton>
@@ -2035,6 +2037,7 @@ function LayoutsTab() {
 
         <SettingRow label={scrollMode === 'paginated' ? t('admin.messageList.perPagePaginated') : t('admin.messageList.perPageInfinite')}>
           <ChoiceChips
+            label={scrollMode === 'paginated' ? t('admin.messageList.perPagePaginated') : t('admin.messageList.perPageInfinite')}
             isActive={n => pageSize === n}
             onSelect={setPageSize}
             options={[25, 50, 100, 200].map(n => ({ value: n, label: String(n) }))}
@@ -2208,6 +2211,7 @@ function BehaviorTab() {
       <SettingGroup title={t('admin.behavior.sync')}>
         <SettingRow label={t('admin.messageList.syncFrequency')} desc={t('admin.messageList.syncFrequencyDesc')}>
           <ChoiceChips
+            label={t('admin.messageList.syncFrequency')}
             isActive={v => syncInterval === v}
             onSelect={setSyncInterval}
             options={[
@@ -2221,6 +2225,7 @@ function BehaviorTab() {
 
         <SettingRow label={t('admin.messageList.folderSyncFrequency')} desc={t('admin.messageList.folderSyncFrequencyDesc')}>
           <ChoiceChips
+            label={t('admin.messageList.folderSyncFrequency')}
             isActive={v => folderSyncInterval === v}
             onSelect={setFolderSyncInterval}
             options={[
@@ -8634,7 +8639,7 @@ export default function AdminPanel() {
         position: 'fixed', inset: 0, zIndex: 2000,
         background: 'var(--bg-secondary)',
         display: 'flex', flexDirection: 'column',
-        animation: 'sheet-enter var(--motion-normal) var(--ease-emphasized) both',
+        animation: 'sheet-enter var(--md-sys-motion-default-spatial) both',
       }}>
         {/* Mobile header */}
         <div style={{

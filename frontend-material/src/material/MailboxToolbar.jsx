@@ -18,7 +18,7 @@ export default function MailboxToolbar({ label, count, syncing, onSync, syncLabe
   return <>
     <div className="material-list-toolbar" data-scrolled={scrolled || undefined}>
       {search || <>
-      {onMenu && <MaterialButton variant="icon" aria-label={t('messageList.menu')} onClick={onMenu}><MaterialIcon name="menu" /></MaterialButton>}
+      {onMenu && <MaterialButton variant="icon" className="material-list-menu" aria-controls="material-folder-pane" aria-label={t('messageList.menu')} onClick={onMenu}><MaterialIcon name="menu" /></MaterialButton>}
       <h2 title={orderSummary ? `${label} — ${t('messageList.sortedBy', { order: orderSummary })}` : label}><span>{label}</span>{orderSummary && <span className="material-list-order">{orderSummary}</span>}</h2>
       {count != null && <span className="material-list-count">{count}</span>}
       <div className="material-list-actions">

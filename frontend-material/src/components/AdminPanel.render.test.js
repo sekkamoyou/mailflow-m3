@@ -131,6 +131,34 @@ test('color palettes are named native radio options independent of light/dark mo
   }
 });
 
+test('changing UI scale keeps the focused slider in view', async () => {
+  const previousSize = useStore.getState().fontSize;
+  useStore.setState({ user: { id: 'u1' }, accounts: [], adminTab: 'appearance', fontSize: 100 });
+  const root = createRoot(document.getElementById('root'));
+  try {
+    await React.act(async () => root.render(React.createElement(AdminPanel)));
+    const fonts = [...document.querySelectorAll('.admin-subtab')]
+      .find(button => button.textContent === 'admin.tabs.fontsAndLanguage');
+    await React.act(async () => fonts.click());
+
+    const slider = document.querySelector('input[type=range][aria-label="admin.appearance.fontSize"]');
+    const scrolls = [];
+    slider.scrollIntoView = options => scrolls.push(options);
+    slider.focus();
+    await React.act(async () => useStore.setState({ fontSize: 130 }));
+    assert.equal(document.activeElement, slider);
+    assert.equal(slider.getAttribute('aria-valuetext'), '130%');
+    assert.deepEqual(scrolls, [{ block: 'nearest', inline: 'nearest', behavior: 'instant' }]);
+
+    slider.blur();
+    await React.act(async () => useStore.setState({ fontSize: 80 }));
+    assert.equal(scrolls.length, 1);
+  } finally {
+    await React.act(async () => root.unmount());
+    useStore.setState({ fontSize: previousSize });
+  }
+});
+
 test('custom palette validates HEX drafts, applies native color changes and recalls the saved seed', async () => {
   const original = useStore.getState().setColorPalette;
   const calls = [];

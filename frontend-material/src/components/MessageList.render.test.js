@@ -127,6 +127,26 @@ const draggableIn = (msgid) => {
   return row.querySelector('[draggable]');
 };
 
+test('arrow keys move between row-open buttons before Enter opens the focused message', async () => {
+  const next = { ...MESSAGE, id: 'msg-next', uid: 2, message_id: '<next@example.com>', subject: 'Second message' };
+  useStore.setState({ selectedMessageId: null });
+  await mount({ rows: [MESSAGE, next], threadedView: false });
+  try {
+    const first = container.querySelector('[data-message-open="msg-1"]');
+    const second = container.querySelector('[data-message-open="msg-next"]');
+    first.focus();
+    const down = new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
+    await React.act(async () => first.dispatchEvent(down));
+    assert.equal(document.activeElement, second);
+    assert.equal(useStore.getState().selectedMessageId, null);
+    await React.act(async () => second.click());
+    assert.equal(useStore.getState().selectedMessageId, next.id);
+  } finally {
+    await React.act(async () => root.unmount());
+    root = null;
+  }
+});
+
 for (const width of [390, 912]) for (const threadedView of [false, true]) {
   test(`touch avatar long press and selection dismissal at ${width}px, threaded=${threadedView}`, async (t) => {
     const previousWidth = window.innerWidth;
@@ -236,7 +256,7 @@ describe('MessageList — the Snoozed view with conversations on', () => {
     const sender = [...container.querySelector('[data-msgid="sz-a"]').querySelectorAll('*')]
       .find(el => el.children.length === 0 && el.textContent === 'Sender');
     assert.ok(sender, 'the sender is shown');
-    assert.equal(sender.style.fontWeight, '700', 'and shown unread');
+    assert.equal(sender.style.fontWeight, 'var(--md-sys-typescale-title-medium-emphasized-weight)', 'and shown unread');
   });
 });
 
@@ -382,24 +402,6 @@ describe('MessageList — Ctrl+Z undo shortcut (#449)', () => {
     await React.act(async () => { shortcutBus.emit('undoAction'); });
     await React.act(async () => { shortcutBus.emit('undoAction'); }); // nothing left — no throw, no change
     assert.deepEqual(undone, ['newer', 'older']);
-  });
-});
-
-describe('MessageList — undo bar length', () => {
-  // Undo send holds a message for 10 s, longer than the standard window, and its bar must stay
-  // up (and its progress run) for exactly that long, or Undo vanishes while it would still work.
-  test('a bar lasts as long as its notification asks, the rest the standard window', async () => {
-    await mount({ rows: [MESSAGE], threadedView: false });
-    await React.act(async () => {
-      useStore.setState({ notifications: [] });
-      useStore.getState().addNotification({ title: 'standard', onUndo: () => {} });
-      useStore.getState().addNotification({ title: 'held send', onUndo: () => {}, undoMs: 9876 });
-    });
-    const progress = [...container.querySelectorAll('div')]
-      .map(el => el.style.animation)
-      .filter(a => a.startsWith('action-bar-progress'));
-    assert.deepEqual(progress.sort(), ['action-bar-progress 4500ms linear forwards', 'action-bar-progress 9876ms linear forwards']);
-    await React.act(async () => { useStore.setState({ notifications: [] }); });
   });
 });
 

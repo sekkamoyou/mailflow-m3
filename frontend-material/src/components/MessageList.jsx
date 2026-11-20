@@ -29,7 +29,6 @@ import { useHoverPrefetch, useVisiblePreviews } from '../hooks/useHoverPrefetch.
 import ContextMenu from './ContextMenu.jsx';
 import RowHoverActions from './RowHoverActions.jsx';
 import { StarIcon } from './MessageActions.jsx';
-import UndoBar from './UndoBar.jsx';
 import ScheduledList from './ScheduledList.jsx';
 import { SCHEDULED_VIEW } from '../utils/scheduledCompose.js';
 import { applyListOrder, isSortableList, listOrderFor } from '../utils/listSort.js';
@@ -74,7 +73,7 @@ import {
   isCurrentThreadLoad,
   unreadCountsByAccount,
 } from '../utils/threadedArchive.js';
-import { createUndoableCommit, holdUndoable, releaseUndoable, UNDO_COMMIT_DELAY_MS } from '../utils/undoableAction.js';
+import { createUndoableCommit, holdUndoable, isUndoAvailable, releaseUndoable, UNDO_COMMIT_DELAY_MS } from '../utils/undoableAction.js';
 import { resolveConversationSelection, selectListedMessage } from '../utils/conversation.js';
 
 // Folder icon for move picker
@@ -90,6 +89,10 @@ function FolderIcon({ specialUse, size = 13 }) {
 
 function restoreMessagesIfViewCurrent(viewKey, currentViewKeyRef, messages) {
   if (currentViewKeyRef.current === viewKey) useStore.getState().restoreMessages(messages);
+}
+
+function scrollBehavior() {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth';
 }
 
 // After a manual sync, when to reload the list if the socket has not said the sync finished.
@@ -181,7 +184,7 @@ function MailboxList({ searchHost }) {
     setMessagesOffset, hasMoreMessages, setHasMoreMessages,
     loadingMessages, setLoadingMessages, selectedMessageId, lastViewedMessageId,
     updateMessage, removeMessage, removeMessages,
-    decrementUnread, incrementUnread, addNotification, notifications, removeNotification,
+    decrementUnread, incrementUnread, addNotification,
     searchQuery, setSearchQuery, setIsSearching, mobileSearchOpen, setMobileSearchOpen,
     searchResults, setSearchResults, openCompose, accountsReady, accounts,
     messagesRefreshToken, layout, setLayout, pageSize, setPageSize, scrollMode,
@@ -228,7 +231,6 @@ function MailboxList({ searchHost }) {
   // server-side. undefined = search all folders.
   const searchFolder = (!isUnified && !searchAllFolders) ? selectedFolder : undefined;
   const searchPageSize = Math.max(1, Math.min(Number(pageSize) || 50, 200));
-  const undoableNotifications = notifications.filter(n => n.onUndo);
 
   const currentLayout = LAYOUTS[layout] || LAYOUTS.comfortable;
   const isColumn = currentLayout.direction === 'column';
@@ -1566,10 +1568,17 @@ function MailboxList({ searchHost }) {
   scRef.current.threadFetchFolder = selectedAccountId ? selectedFolder : 'INBOX';
   scRef.current.threadFetchUnified = isUnified;
 
-  // Arrow-key navigation: intercepts ArrowDown/ArrowUp when the list container has focus.
-  const handleListKeyDown = useCallback((e) => {
-    if (e.key === 'ArrowDown') { e.preventDefault(); shortcutBus.emit('nextMessage'); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); shortcutBus.emit('prevMessage'); }
+  const handleListKeyDown = useCallback((event) => {
+    const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
+    if (!step) return;
+    event.preventDefault();
+    if (event.target.matches('button[data-message-open]')) {
+      const rows = [...event.currentTarget.querySelectorAll('button[data-message-open]:not(:disabled):not([tabindex="-1"])')];
+      const next = rows[rows.indexOf(event.target) + step];
+      next?.focus();
+    } else {
+      shortcutBus.emit(step > 0 ? 'nextMessage' : 'prevMessage');
+    }
   }, []);
 
   // Called when the avatar is clicked: enters selection mode and selects that message
@@ -2274,7 +2283,7 @@ function MailboxList({ searchHost }) {
     };
 
     // #449: Ctrl/Cmd+Z fires the newest still-pending undo — the same onUndo the visible
-    // UndoBar button runs, so the keyboard can never undo more than the toasts offer, and
+    // snackbar Undo button runs, so the keyboard can never undo more than the toasts offer, and
     // an expired window (toast gone, commit fired) is simply not undoable any more.
     // Notifications are stored newest-first. This supersedes GTD's own ctrl+z: a GTD
     // classification's undo is an onUndo notification like any other, so newest-wins
@@ -2283,7 +2292,7 @@ function MailboxList({ searchHost }) {
     // emit can never run the same undo twice.
     const onUndoAction = () => {
       const state = getState();
-      const last = state.notifications.find(n => typeof n.onUndo === 'function');
+      const last = state.notifications.find(isUndoAvailable);
       if (!last) return;
       state.removeNotification(last.id);
       void last.onUndo();
@@ -3061,7 +3070,7 @@ function MailboxList({ searchHost }) {
           >
             {!isMobile && catScrollEdges.left && (
               <MaterialButton type="button" variant="icon" className="material-category-arrow material-category-previous" aria-label={t('messageList.categoryScrollPrevious')}
-                onClick={() => { catScrollRef.current?.scrollBy({ left: -120, behavior: 'smooth' }); }}
+                onClick={() => { catScrollRef.current?.scrollBy({ left: -120, behavior: scrollBehavior() }); }}
               >
                 <MaterialIcon name="chevron_left" />
               </MaterialButton>
@@ -3186,7 +3195,7 @@ function MailboxList({ searchHost }) {
             })}
             {!isMobile && catScrollEdges.right && (
               <MaterialButton type="button" variant="icon" className="material-category-arrow material-category-next" aria-label={t('messageList.categoryScrollNext')}
-                onClick={() => { catScrollRef.current?.scrollBy({ left: 120, behavior: 'smooth' }); }}
+                onClick={() => { catScrollRef.current?.scrollBy({ left: 120, behavior: scrollBehavior() }); }}
               >
                 <MaterialIcon name="chevron_right" />
               </MaterialButton>
@@ -3211,8 +3220,8 @@ function MailboxList({ searchHost }) {
           onKeyDown={handleListKeyDown}
           onPointerMove={hoverPrefetch.onPointerMove}
           onPointerLeave={hoverPrefetch.onPointerLeave}
-          tabIndex={0}
-          style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden', outline: 'none', overscrollBehavior: 'contain', boxSizing: 'border-box', paddingBottom: isMobile ? 'var(--material-list-floating-space, 160px)' : 80 }}
+          tabIndex={0} className="md-message-list-scroll" role="region" aria-label={label}
+          style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain', boxSizing: 'border-box', paddingBottom: isMobile ? 'var(--material-list-floating-space, 160px)' : 80 }}
         >
           {showGtdTab ? <GtdTabList /> : (<>
           {/* Pull-to-refresh indicator */}
@@ -3566,7 +3575,7 @@ function MailboxList({ searchHost }) {
                     borderRadius: '16px 16px 0 0',
                     boxShadow: '0 -4px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.04)',
                     paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)',
-                    animation: 'sheet-enter 0.2s cubic-bezier(0.34,1.56,0.64,1)',
+                    animation: 'sheet-enter var(--md-sys-motion-default-spatial)',
                   }}>
                     {/* Drag handle */}
                     <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0 4px' }}>
@@ -3850,7 +3859,7 @@ function MailboxList({ searchHost }) {
         {/* Scroll-to-top button — desktop only (mobile handled in FAB container below) */}
         {!isMobile && showScrollTop && (
           <MaterialButton variant="icon" className="material-scroll-top"
-            onClick={() => { if (listRef.current) listRef.current.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onClick={() => { if (listRef.current) listRef.current.scrollTo({ top: 0, behavior: scrollBehavior() }); }}
             title={t('messageList.backToTop')}
             style={{
               position: 'absolute', bottom: 20, right: 16, zIndex: 20,
@@ -3883,7 +3892,7 @@ function MailboxList({ searchHost }) {
         }}>
           {showScrollTop && (
             <MaterialButton variant="icon" className="material-scroll-top"
-              onClick={() => { if (listRef.current) listRef.current.scrollTo({ top: 0, behavior: 'smooth' }); }}
+              onClick={() => { if (listRef.current) listRef.current.scrollTo({ top: 0, behavior: scrollBehavior() }); }}
               title={t('messageList.backToTop')}
               style={{
                 pointerEvents: 'auto',
@@ -3949,17 +3958,6 @@ function MailboxList({ searchHost }) {
           );
         })()}
       </div>
-
-      {/* Undo bar — anchored to the bottom of the list panel on desktop */}
-      {!isMobile && undoableNotifications.map((n, i) => (
-        <UndoBar
-          key={n.id}
-          notification={n}
-          onDismiss={() => removeNotification(n.id)}
-          showTopBorder={i === 0}
-        />
-      ))}
-
 
     </div>
   );
@@ -4258,7 +4256,7 @@ function ThreadRow({ message, isExpanded, threadMsgs, isLoadingThread, selectedM
                 <AccountMark accountId={message.account_id} color={message.account_color || '#6366f1'} size={6} />
               )}
               <span className="md-row-sender-text" style={{
-                fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: unreadCount > 0 ? 700 : 500,
+                fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: unreadCount > 0 ? 'var(--md-sys-typescale-title-medium-emphasized-weight)' : 500,
                 color: 'var(--text-primary)',
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
               }}>
@@ -4300,13 +4298,15 @@ function ThreadRow({ message, isExpanded, threadMsgs, isLoadingThread, selectedM
           {/* Row 2: subject */}
           <div className="md-row-subject" style={{
             display: 'flex', alignItems: 'center', gap: 4,
-            fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: unreadCount > 0 ? 600 : 400,
+            fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: unreadCount > 0 ? 'var(--md-sys-typescale-body-emphasized-weight)' : 400,
             color: unreadCount > 0 ? 'var(--text-primary)' : 'var(--text-secondary)',
             marginBottom: 2,
           }}>
-            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <button type="button" className="md-row-open" data-message-open={message.id}
+              aria-current={!selectionMode && selectedHere ? true : undefined} tabIndex={selectionMode ? -1 : undefined}
+              style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {message.subject || t('common.noSubject')}
-            </span>
+            </button>
             <MessageClassification message={message} compact />
 
           </div>
@@ -4376,13 +4376,15 @@ function ThreadRow({ message, isExpanded, threadMsgs, isLoadingThread, selectedM
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{
-                    fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: msg.is_read ? 400 : 600,
-                    color: msg.is_read ? 'var(--text-secondary)' : 'var(--text-primary)',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
-                  }}>
+                  <button type="button" className="md-row-open" data-message-open={msg.id}
+                    aria-current={!selectionMode && selectedMessageId === msg.id ? true : undefined} disabled={selectionMode}
+                    style={{
+                      fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: msg.is_read ? 400 : 'var(--md-sys-typescale-body-emphasized-weight)',
+                      color: msg.is_read ? 'var(--text-secondary)' : 'var(--text-primary)',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+                    }}>
                     {msg.from_name || msg.from_email || t('common.unknown', 'Unknown')}
-                  </span>
+                  </button>
                   <span style={{ fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-tertiary)', flexShrink: 0, marginLeft: 8 }}>
                     {formatDate(msg.date)}
                   </span>
@@ -4516,7 +4518,7 @@ function MessageRow({ message, selected, lastViewed, isChecked, selectionMode, s
               <AccountMark accountId={message.account_id} color={message.account_color || '#6366f1'} size={6} />
             )}
             <span className="md-row-sender-text" style={{
-              fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: message.is_read ? 500 : 700,
+              fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: message.is_read ? 500 : 'var(--md-sys-typescale-title-medium-emphasized-weight)',
               color: 'var(--text-primary)',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               flex: 1, minWidth: 0,
@@ -4550,13 +4552,15 @@ function MessageRow({ message, selected, lastViewed, isChecked, selectionMode, s
         {/* Row 2: Subject */}
         <div className="md-row-subject" style={{
           display: 'flex', alignItems: 'center', gap: 4,
-          fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: message.is_read ? 400 : 600,
+          fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: message.is_read ? 400 : 'var(--md-sys-typescale-body-emphasized-weight)',
           color: message.is_read ? 'var(--text-secondary)' : 'var(--text-primary)',
           marginBottom: 3,
         }}>
-          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <button type="button" className="md-row-open" data-message-open={message.id}
+            aria-current={!selectionMode && selected ? true : undefined} tabIndex={selectionMode ? -1 : undefined}
+            style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {message.subject || t('message.noSubject')}
-          </span>
+          </button>
           <MessageClassification message={message} compact />
 
         </div>

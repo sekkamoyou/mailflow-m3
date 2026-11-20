@@ -278,30 +278,19 @@ test('parent and leaf folders keep a shared disclosure column and toggles expose
   assert.ok(rows.some(r => Number(r.dataset.folderDepth) > 0));
 });
 
-test('mobile drawer exposes Contacts independently and closes without resetting the mailbox', async () => {
-  const width = window.innerWidth;
-  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 416 });
-  try {
-    await mount({ state: { showContacts: false, showAdmin: true, selectedMessageId: 'kept-message' } });
-    await React.act(async () => useStore.setState({ mobileSidebarOpen: true }));
-    const entry = [...document.querySelectorAll('[data-mailbox-sidebar] [role=button]')].find(e => e.textContent.trim() === 'contacts.title');
-    assert.ok(entry, 'Contacts is a root drawer entry');
-    await React.act(async () => entry.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
-    assert.equal(useStore.getState().showContacts, true);
-    assert.equal(useStore.getState().showAdmin, false);
-    assert.equal(useStore.getState().mobileSidebarOpen, false);
-    assert.equal(useStore.getState().selectedMessageId, 'kept-message');
-    assert.equal(entry.classList.contains('nav-item-active'), true);
-    await React.act(async () => useStore.getState().setShowContacts(false));
-    assert.equal(useStore.getState().selectedMessageId, 'kept-message');
-    await React.act(async () => root.unmount()); root = null;
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
-    await mount({ state: { showContacts: false } });
-    assert.equal([...document.querySelectorAll('[data-mailbox-sidebar] [role=button]')].some(e => e.textContent.trim() === 'contacts.title'), false);
-  } finally {
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
-    if (root) { await React.act(async () => root.unmount()); root = null; }
-  }
+test('Contacts uses primary navigation and preserves the selected mailbox message', async () => {
+  const MaterialNavigation = (await import('../material/Navigation.jsx')).default;
+  await mount({ state: { showContacts: false, showAdmin: false, selectedMessageId: 'kept-message' } });
+  assert.equal(document.querySelector('[data-mailbox-sidebar] [aria-label="contacts.title"]'), null);
+  await React.act(async () => root.render(React.createElement(MaterialNavigation, { layout: 'bar' })));
+  const entry = document.querySelector('.material-navigation button[aria-label="contacts.title"]');
+  await React.act(async () => entry.click());
+  assert.equal(useStore.getState().showContacts, true);
+  assert.equal(entry.getAttribute('aria-current'), 'page');
+  assert.equal(useStore.getState().selectedMessageId, 'kept-message');
+  await React.act(async () => document.querySelector('.material-navigation button[aria-label="material.mail"]').click());
+  assert.equal(useStore.getState().showContacts, false);
+  assert.equal(useStore.getState().selectedMessageId, 'kept-message');
 });
 
 // #695: every account started at sort_order 0, and Move up / Move down saved only the two accounts

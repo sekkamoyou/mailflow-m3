@@ -2182,6 +2182,8 @@
     "count": "{{count}} 연락처",
     "search": "연락처 검색…",
     "fields": {
+      "emailType": "이메일 유형",
+      "phoneType": "전화번호 유형",
       "displayName": "표시 이름",
       "firstName": "이름",
       "lastName": "성",
@@ -2445,6 +2447,8 @@
     "createAppPassword": "앱 비밀번호 만들기"
   },
   "material": {
+    "folderPane": "메일 폴더",
+    "rightPane": "오른쪽 사이드바",
     "navigation": "기본 탐색",
     "mail": "메일",
     "themes": {

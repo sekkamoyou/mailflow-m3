@@ -2,6 +2,7 @@ import { descaleCss } from '../utils/uiScaleCss.js';
 import { MaterialProgress } from '../material/controls.jsx';
 import { MaterialIcon } from '../material/controls.jsx';
 import MaterialNavigation from '../material/Navigation.jsx';
+import PaneResizeHandle from '../material/PaneResizeHandle.jsx';
 import { useModalFocus } from '../material/useModalFocus.js';
 import { MaterialButton } from '../material/controls.jsx';
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -35,7 +36,7 @@ import { usePluginSlot, PluginRuntime } from '../plugins/PluginSlot.jsx';
 import { takePendingDeepLink, watchPendingDeepLink } from '../utils/pendingDeepLink.js';
 import { scheduledFeed } from '../utils/scheduledFeed.js';
 import { noticeToast, scheduledLinkId } from '../utils/scheduledView.js';
-import { openScheduledView } from '../utils/scheduledCompose.js';
+import { openScheduledView, SCHEDULED_VIEW } from '../utils/scheduledCompose.js';
 import { openSentMessage } from '../utils/openSentMessage.js';
 
 // Opens the Scheduled view at one message, highlighted (a notification link or a toast's Open).
@@ -66,7 +67,7 @@ export default function MailApp() {
   const {
     setAccounts, setUnreadCounts, showAdmin,
     setShowAdmin, setAdminTab, composing, composeSession, sidebarCollapsed, layout,
-    unreadCounts, selectedAccountId, openCompose, setSelectedAccount,
+    unreadCounts, selectedAccountId, selectedFolder, openCompose, setSelectedAccount,
     shortcuts, selectedMessageId, setSelectedMessage,
     mobileSidebarOpen, setMobileSidebarOpen, mobileSearchOpen, setMobileSearchOpen, addNotification,
     fontSize, showAppBadge, showFaviconBadge,
@@ -146,77 +147,39 @@ export default function MailApp() {
     if (!isMobile || !changed) return;
     const frame = requestAnimationFrame(() => {
       const target = [...(workspaceRef.current?.querySelectorAll('button') || [])].find(button =>
-        !button.disabled && !button.closest('[inert], [aria-hidden="true"]') && button.getClientRects().length);
+        !button.disabled && !button.closest('.material-navigation, [inert], [aria-hidden="true"]') && button.getClientRects().length);
       target?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
   }, [showContacts, isMobile]);
   const sidebarDragRef = useRef(null);
-  const sidebarResizeRef = useRef(null);
-  const listResizeRef = useRef(null);
-  const rightSidebarResizeRef = useRef(null);
 
   // Keep the right sidebar's width CSS var in sync with the persisted preference.
   useEffect(() => {
     document.documentElement.style.setProperty('--right-sidebar-width', rightSidebarWidth + 'px');
   }, [rightSidebarWidth]);
 
-  const handleSidebarResizeMouseDown = (e) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = sidebarWidth;
-    setIsSidebarResizing(true);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-
-    const onMouseMove = (mv) => {
-      const dx = mv.clientX - startX;
-      const clamped = Math.min(400, Math.max(160, startWidth + dx));
-      setSidebarWidth(clamped);
-    };
-
-    const onMouseUp = () => {
-      setIsSidebarResizing(false);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-      sidebarResizeRef.current = null;
-    };
-
-    sidebarResizeRef.current = { onMouseMove, onMouseUp };
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (sidebarResizeRef.current) {
-        document.removeEventListener('mousemove', sidebarResizeRef.current.onMouseMove);
-        document.removeEventListener('mouseup', sidebarResizeRef.current.onMouseUp);
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-      }
-      if (listResizeRef.current) {
-        document.removeEventListener('mousemove', listResizeRef.current.onMouseMove);
-        document.removeEventListener('mouseup', listResizeRef.current.onMouseUp);
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-      }
-      if (rightSidebarResizeRef.current) {
-        document.removeEventListener('mousemove', rightSidebarResizeRef.current.onMouseMove);
-        document.removeEventListener('mouseup', rightSidebarResizeRef.current.onMouseUp);
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-      }
-    };
-  }, []);
-
   const currentLayout = LAYOUTS[layout] || LAYOUTS.comfortable;
   // List first (#596): on a desktop the list or the open message fills the content area and Back
   // returns to the list, as on a phone.
   const listFirst = !isMobile && Boolean(currentLayout.listFirst);
   const singleView = isMobile || listFirst;
+  const scheduledView = selectedAccountId === null && selectedFolder === SCHEDULED_VIEW;
+  const previousMessage = useRef(selectedMessageId);
+  useLayoutEffect(() => {
+    const previous = previousMessage.current;
+    previousMessage.current = selectedMessageId;
+    if (!singleView || showContacts || previous === selectedMessageId) return;
+    const workspace = workspaceRef.current;
+    if (!previous && selectedMessageId) {
+      workspace?.querySelector('[data-reader-back]')?.focus({ preventScroll: true });
+    } else if (previous && !selectedMessageId) {
+      const row = Array.from(workspace?.querySelectorAll('[data-message-open]') || [])
+        .find(button => button.dataset.messageOpen === String(previous) && button.getClientRects().length);
+      if (row) row.focus();
+      else workspace?.querySelector('.md-message-list-scroll')?.focus({ preventScroll: true });
+    }
+  }, [selectedMessageId, showContacts, singleView]);
 
   // Shortcut hint (e.g. "⌘/") for the collapse/expand tooltips, derived from the
   // live shortcut map via the existing helpers — no new plumbing. '' when unbound.
@@ -238,7 +201,7 @@ export default function MailApp() {
   useLayoutEffect(() => {
     const content = mailContentRef.current;
     if (!content || typeof ResizeObserver === 'undefined') return;
-    const list = content.querySelector('.material-list');
+    const list = content.querySelector('#material-mail-list');
     const measure = () => {
       if (!content.clientWidth) return;
       const available = content.clientWidth - (listFirst ? 0 : list?.offsetWidth || 0);
@@ -249,72 +212,16 @@ export default function MailApp() {
     observer.observe(content);
     if (list) observer.observe(list);
     return () => observer.disconnect();
-  }, [isMobile, currentLayout.direction, listFirst, rightSidebarWidth, showContacts]);
+  }, [isMobile, currentLayout.direction, listFirst, rightSidebarWidth, showContacts, scheduledView]);
   useEffect(() => { setRightSidebarOverlayOpen(false); }, [rightSidebarFits]);
   const rightSidebarCtx = { accounts, selectedAccountId, onCollapse: toggleVisibleRightSidebar, toggleHint: rightSidebarToggleHint };
   const rightSidebarProviders = usePluginSlot('right-sidebar', rightSidebarCtx);
   const rightSidebarContent = rightSidebarProviders.length ? rightSidebarProviders[0].render(rightSidebarCtx) : null;
   const rightSidebarApplicable = !isMobile && currentLayout.direction === 'row' && rightSidebarContent != null;
-
-  const handleListResizeMouseDown = (e) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--list-width')) || currentLayout.listWidth || 360;
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-
-    const onMouseMove = (mv) => {
-      const dx = mv.clientX - startX;
-      const clamped = Math.max(180, Math.min(700, startWidth + dx));
-      document.documentElement.style.setProperty('--list-width', clamped + 'px');
-    };
-
-    const onMouseUp = () => {
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-      listResizeRef.current = null;
-      const finalWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--list-width'));
-      if (finalWidth) localStorage.setItem('mailflow_list_width', String(finalWidth));
-    };
-
-    listResizeRef.current = { onMouseMove, onMouseUp };
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  };
-
-  // Right-sidebar resize — its own width var + handle, independent of --list-width.
-  // The handle sits to its left, so dragging left widens the sidebar.
-  const handleRightSidebarResizeMouseDown = (e) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--right-sidebar-width')) || rightSidebarWidth || 296;
-    setIsRightSidebarResizing(true);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-
-    const onMouseMove = (mv) => {
-      const dx = mv.clientX - startX;
-      const clamped = Math.max(200, Math.min(600, startWidth - dx));
-      document.documentElement.style.setProperty('--right-sidebar-width', clamped + 'px');
-    };
-
-    const onMouseUp = () => {
-      setIsRightSidebarResizing(false);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-      rightSidebarResizeRef.current = null;
-      const finalWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--right-sidebar-width'));
-      if (finalWidth) setRightSidebarWidth(finalWidth);
-    };
-
-    rightSidebarResizeRef.current = { onMouseMove, onMouseUp };
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  };
+  const rightPanePinned = rightSidebarApplicable && !rightSidebarCollapsed && !sidebarOverlay;
+  // Reserve the reader, the divider and any right sidebar controls in the same row.
+  const listResizeReserve = rightPanePinned ? 322 + rightSidebarWidth
+    : rightSidebarApplicable && rightSidebarCollapsed ? 369 : 321;
 
   // Push a history entry when an email is opened on mobile so that the browser's
   // native back gesture (iOS swipe, Android back button) pops an in-app state
@@ -361,10 +268,10 @@ export default function MailApp() {
     return () => window.removeEventListener('popstate', handler);
   }, [singleView, setSelectedMessage, setMobileSearchOpen]);
 
-  // List first: Escape in an open message goes back to the list, unless a menu or dialog is open
+  // Escape in a single-pane reader goes back to the list, unless a menu or dialog is open
   // (its own Escape closes it).
   useEffect(() => {
-    if (!listFirst) return undefined;
+    if (!singleView) return undefined;
     const onKey = (e) => {
       if (e.key !== 'Escape' || e.defaultPrevented || !selectedMessageIdRef.current) return;
       if (composingRef.current || showAdminRef.current || paletteOpenRef.current) return;
@@ -375,7 +282,7 @@ export default function MailApp() {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [listFirst]);
+  }, [singleView]);
 
   const wsRef = useWebSocket();
 
@@ -912,7 +819,8 @@ export default function MailApp() {
       width: '100vw', height: 'var(--app-height, 100svh)',
       overflow: 'hidden', background: 'var(--bg-primary)',
     }}>
-    <div className="material-app-inner" data-ui-scale-root="" style={{
+    <div className="material-app-inner" data-ui-scale-root="" data-primary-view={showContacts || !selectedMessageId || undefined}
+      data-mail-list-view={!showContacts && !selectedMessageId || undefined} style={{
       '--ui-scale': scale,
       display: 'flex',
       // Sized in CSS from the 100dvh parent: an innerHeight read on resize is stale during
@@ -925,18 +833,22 @@ export default function MailApp() {
       }),
       overflow: 'hidden',
       background: 'var(--bg-primary)',
-      flexDirection: isMobile ? 'row' : 'column',
+      flexDirection: 'column',
       '--material-drawer-width': `${sidebarCollapsed ? 80 : Math.max(280, sidebarWidth)}px`,
     }}>
       {!isMobile && <header className="material-app-header">
         <div className="material-app-brand" data-collapsed={sidebarCollapsed}>
-          <MaterialButton variant="icon" aria-label={t('messageList.menu')} onClick={() => overlayDrawer ? setMobileSidebarOpen(!mobileSidebarOpen) : toggleSidebar()}><MaterialIcon name="menu" /></MaterialButton>
+          {!overlayDrawer && <MaterialButton variant="icon" aria-label={t('messageList.menu')}
+            aria-controls="material-folder-pane" aria-expanded={!sidebarCollapsed} onClick={toggleSidebar}>
+            <MaterialIcon name="menu" />
+          </MaterialButton>}
           <span className="material-brand-name"><LogoMark size={28} /><span>{appDisplayName}</span></span>
         </div>
         <div className="material-global-search" ref={setSearchHost} style={{ visibility: showContacts ? 'hidden' : undefined }} />
-        <MaterialNavigation />
       </header>}
       <div className="material-workspace" ref={workspaceRef}>
+      {overlayDrawer && <MaterialNavigation layout="rail" onToggleFolders={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+        foldersOpen={mobileSidebarOpen} />}
       {isMobile ? (
         <>
           {/* Backdrop — covers full screen including status bar area */}
@@ -953,14 +865,15 @@ export default function MailApp() {
           )}
           {/* Slide-in sidebar drawer */}
           <div
-            ref={drawerRef} role={mobileSidebarOpen ? 'dialog' : undefined} aria-modal={mobileSidebarOpen ? 'true' : undefined} aria-label={t('messageList.menu')}
-            inert={!mobileSidebarOpen ? '' : undefined}
+            ref={drawerRef} id="material-folder-pane" role={mobileSidebarOpen ? 'dialog' : undefined} aria-modal={mobileSidebarOpen ? 'true' : undefined} aria-label={t('messageList.menu')}
+            inert={!mobileSidebarOpen}
             aria-hidden={!mobileSidebarOpen}
             style={{
               position: 'fixed', left: 0, top: 0, bottom: 0,
               zIndex: 901, display: 'flex',
+              visibility: mobileSidebarOpen ? 'visible' : 'hidden',
               transform: mobileSidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
-              transition: 'transform 0.25s cubic-bezier(0.25,0.46,0.45,0.94)',
+              transition: 'transform var(--md-sys-motion-default-spatial-standard)',
               boxShadow: mobileSidebarOpen ? 'var(--shadow-drawer)' : 'none',
             }}
             onTouchStart={(e) => {
@@ -991,20 +904,13 @@ export default function MailApp() {
       ) : (
         <>
           {mobileSidebarOpen && overlayDrawer && <div data-modal-scrim="" className="material-drawer-scrim" onClick={() => setMobileSidebarOpen(false)} />}
-          <div ref={drawerRef} className="material-desktop-drawer" data-open={mobileSidebarOpen}
-            role={mobileSidebarOpen && overlayDrawer ? 'dialog' : undefined} aria-modal={mobileSidebarOpen && overlayDrawer ? 'true' : undefined} aria-label={t('messageList.menu')}><Sidebar onClose={overlayDrawer ? () => setMobileSidebarOpen(false) : undefined} /></div>
-          {!sidebarCollapsed && (
-            <div className="material-sidebar-resize"
-              onMouseDown={handleSidebarResizeMouseDown}
-              style={{
-                width: 1, flexShrink: 0, cursor: 'col-resize',
-                background: 'transparent',
-                transition: 'background 0.15s',
-                zIndex: 10,
-              }}
-              
-              
-            />
+          <div ref={drawerRef} id="material-folder-pane" className="material-folder-rail" data-open={mobileSidebarOpen}
+            role={mobileSidebarOpen && overlayDrawer ? 'dialog' : undefined} aria-modal={mobileSidebarOpen && overlayDrawer ? 'true' : undefined} aria-label={t('messageList.menu')}><Sidebar expandedRail={!overlayDrawer} onClose={overlayDrawer ? () => setMobileSidebarOpen(false) : undefined} /></div>
+          {!sidebarCollapsed && !overlayDrawer && (
+            <PaneResizeHandle paneId="material-folder-pane" label={t('material.folderPane')}
+              min={280} max={400} scale={scale} reserve={!listFirst && currentLayout.direction === 'row' ? 518 : 336}
+              reservePane={rightPanePinned && !showContacts ? 'material-right-pane' : undefined}
+              onCommit={setSidebarWidth} onDragState={setIsSidebarResizing} />
           )}
           <div ref={mailContentRef} className="material-mail-content" style={{
             position: 'relative',
@@ -1016,7 +922,8 @@ export default function MailApp() {
             <div style={{ display: showContacts ? 'flex' : 'none', flex: 1, minWidth: 0, overflow: 'hidden', height: '100%' }}>
               <Suspense fallback={lazyFallback}><ContactsPage /></Suspense>
             </div>
-            <div style={{ display: showContacts ? 'none' : 'flex', flex: 1, minWidth: 0, overflow: 'hidden', height: '100%', flexDirection: currentLayout.direction }}>
+            <div className="material-mail-panes" data-split={!listFirst && currentLayout.direction === 'row' || undefined}
+              style={{ display: showContacts ? 'none' : 'flex', flex: 1, minWidth: 0, overflow: 'hidden', height: '100%', flexDirection: currentLayout.direction, '--mail-list-reserve': `${listResizeReserve}px` }}>
               {listFirst ? (
                 <>
                   {/* Both stay mounted, as on a phone, so the list keeps its place behind a message. */}
@@ -1031,16 +938,14 @@ export default function MailApp() {
               <>
               <MessageList searchHost={searchHost} />
               {currentLayout.direction === 'row' && (
-                <div data-md-state=""
-                  onMouseDown={handleListResizeMouseDown}
-                  style={{
-                    width: 1, flexShrink: 0, cursor: 'col-resize',
-                    background: 'var(--border-subtle)',
-                    transition: 'background 0.15s',
-                  }}
-                  
-                  
-                />
+                <PaneResizeHandle key={scheduledView ? 'scheduled' : 'mailbox'} paneId="material-mail-list"
+                  label={t(scheduledView ? 'sidebar.scheduled' : 'admin.messageList.title')}
+                  min={180} max={700} scale={scale} reserve={listResizeReserve}
+                  onPreview={width => document.documentElement.style.setProperty('--list-width', width + 'px')}
+                  onCommit={width => {
+                    document.documentElement.style.setProperty('--list-width', width + 'px');
+                    localStorage.setItem('mailflow_list_width', String(width));
+                  }} />
               )}
               <ReadingPane />
               </>
@@ -1049,33 +954,28 @@ export default function MailApp() {
               {currentLayout.direction === 'row' && rightSidebarContent != null && (
                 <>
                   {/* Resize handle is omitted while the sidebar is hidden. */}
-                  {!rightSidebarCollapsed && !sidebarOverlay && (
-                    <div data-md-state=""
-                      onMouseDown={handleRightSidebarResizeMouseDown}
-                      style={{
-                        width: 1, flexShrink: 0, cursor: 'col-resize',
-                        background: 'var(--border-subtle)',
-                        transition: 'background 0.15s',
-                      }}
-                      
-                      
-                    />
+                  {rightPanePinned && !showContacts && (
+                    <PaneResizeHandle key={scheduledView ? 'scheduled' : 'mailbox'} paneId="material-right-pane" label={t('material.rightPane')}
+                      min={200} max={600} scale={scale} reverse reserve={322}
+                      reservePane={listFirst ? undefined : 'material-mail-list'}
+                      onPreview={width => document.documentElement.style.setProperty('--right-sidebar-width', width + 'px')}
+                      onCommit={setRightSidebarWidth} onDragState={setIsRightSidebarResizing} />
                   )}
                   {/* Keep plugin state mounted; narrow layouts reopen it over the reader. */}
                   {sidebarOverlay && <div data-modal-scrim="" onClick={() => setRightSidebarOverlayOpen(false)} style={{ position: 'absolute', inset: 0, zIndex: 20, background: 'var(--overlay-scrim)' }} />}
-                  <div ref={sidebarDialogRef} inert={rightSidebarCollapsed ? '' : undefined} role={sidebarOverlay ? 'dialog' : undefined} aria-modal={sidebarOverlay ? true : undefined} aria-label={sidebarOverlay ? t('rightSidebar.show') : undefined} style={{
+                  <div ref={sidebarDialogRef} id="material-right-pane" inert={rightSidebarCollapsed} role={sidebarOverlay ? 'dialog' : undefined} aria-modal={sidebarOverlay ? true : undefined} aria-label={sidebarOverlay ? t('rightSidebar.show') : undefined} style={{
                     position: sidebarOverlay ? 'absolute' : 'relative', right: sidebarOverlay ? 0 : undefined, top: sidebarOverlay ? 0 : undefined, zIndex: sidebarOverlay ? 21 : undefined,
                     flexShrink: 0, overflow: 'hidden', height: '100%', maxWidth: '100%',
                     width: rightSidebarCollapsed ? 0 : 'var(--right-sidebar-width, 296px)',
                     // Disabled while dragging (mirrors Sidebar's isSidebarResizing guard):
                     // otherwise every mousemove's CSS-var write would animate toward the new
                     // width instead of tracking the cursor.
-                    transition: isRightSidebarResizing ? 'none' : 'width 0.2s ease',
+                    transition: isRightSidebarResizing ? 'none' : 'width var(--md-sys-motion-default-spatial-standard)',
                   }}>
                     <div style={{
                       width: 'var(--right-sidebar-width, 296px)', maxWidth: sidebarOverlay ? '100%' : undefined, height: '100%',
                       transform: rightSidebarCollapsed ? 'translateX(100%)' : 'translateX(0)',
-                      transition: 'transform 0.2s ease',
+                      transition: 'transform var(--md-sys-motion-default-spatial-standard)',
                     }}>
                       {rightSidebarContent}
                     </div>
@@ -1107,6 +1007,7 @@ export default function MailApp() {
 
       </div>
 
+      <MaterialNavigation layout="bar" />
       <InboxReplyDraftObserver />
       <Suspense fallback={lazyFallback}>{composing && <ComposeModal key={composeSession} />}</Suspense>
       <Suspense fallback={lazyFallback}>{showAdmin && <AdminPanel />}</Suspense>

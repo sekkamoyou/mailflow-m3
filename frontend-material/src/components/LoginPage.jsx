@@ -930,7 +930,7 @@ export default function LoginPage() {
               </div>
             )}
 
-            <MaterialButton variant="filled"
+            <MaterialButton variant="filled" size="medium"
               type="submit"
               disabled={loading || !username || !password}
               style={{

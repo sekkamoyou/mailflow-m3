@@ -95,25 +95,31 @@ test('GTD sidebar row uses the state layer without overwriting its base fill', a
 test('GTD browse-list row uses the same state layer', async () => {
   const container = document.getElementById('root');
   const root = createRoot(container);
+  let opened = 0;
   await React.act(async () => {
     root.render(React.createElement(GtdEntryRow, {
       thread: ROW,
       sectionKey: 'todo',
       variant: 'list',
-      selected: false,
+      selected: true,
       t: key => key,
-      onClick: () => {},
+      onClick: () => { opened++; },
       onContextMenu: () => {},
     }));
   });
 
   const row = container.firstElementChild;
   try {
+    const open = row.querySelector('button[data-message-open]');
+    assert.equal(open.textContent.trim(), ROW.subject);
+    assert.equal(open.getAttribute('aria-current'), 'true');
+    await React.act(async () => open.click());
+    assert.equal(opened, 1);
     await React.act(async () => {
       row.dispatchEvent(new dom.window.MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
     });
     assert.equal(row.hasAttribute('data-md-state'), true);
-    assert.equal(row.style.background, 'transparent');
+    assert.equal(row.style.background, 'var(--bg-tertiary)');
   } finally {
     await React.act(async () => root.unmount());
   }

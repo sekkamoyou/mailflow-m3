@@ -2297,7 +2297,7 @@ export default function ComposeModal() {
           background: 'var(--md-sys-color-surface-container-high)',
           zIndex: 2000,
           display: 'flex', flexDirection: 'column',
-          animation: 'sheet-enter var(--motion-normal) var(--ease-emphasized) both',
+          animation: 'sheet-enter var(--md-sys-motion-default-spatial) both',
         }}
       >
         <MaterialInput ref={fileInputRef} type="file" multiple onChange={handleFileSelect} style={{ display: 'none' }} />
@@ -2398,7 +2398,7 @@ export default function ComposeModal() {
               aria-haspopup="dialog" aria-expanded={showHeaderActions} onClick={() => setShowHeaderActions(true)}>
               <MaterialIcon name="more_vert" />
             </MaterialButton>
-            <MaterialButton variant="text"
+            <MaterialButton variant="text" className="md-compose-send-now"
               onClick={() => handleSend()}
               disabled={sendDisabled}
               style={{
@@ -2494,7 +2494,7 @@ export default function ComposeModal() {
             <ChipInput
               chips={toChips} onChipsChange={setToChips}
               value={toInput} onChange={setToInput}
-              placeholder={t('compose.toPh')}
+              label={t('compose.to')} placeholder={t('compose.toPh')}
               autoFocus={initialFocus === 'to'}
               inputStyle={mobileInputStyle}
               getSuggestions={getSuggestions}
@@ -2527,7 +2527,7 @@ export default function ComposeModal() {
               <ChipInput
                 chips={ccChips} onChipsChange={setCcChips}
                 value={ccInput} onChange={setCcInput}
-                placeholder={t('compose.ccPh')}
+                label={t('compose.cc')} placeholder={t('compose.ccPh')}
                 inputRef={ccInputRef}
                 inputStyle={mobileInputStyle}
                 getSuggestions={getSuggestions}
@@ -2543,7 +2543,7 @@ export default function ComposeModal() {
               <ChipInput
                 chips={bccChips} onChipsChange={setBccChips}
                 value={bccInput} onChange={setBccInput}
-                placeholder={t('compose.bccPh')}
+                label={t('compose.bcc')} placeholder={t('compose.bccPh')}
                 inputRef={bccInputRef}
                 inputStyle={mobileInputStyle}
                 getSuggestions={getSuggestions}
@@ -2557,7 +2557,7 @@ export default function ComposeModal() {
             <span style={labelStyle}>{t('compose.subject')}</span>
             <MaterialInput
               type="text" value={subject} onChange={e => setSubject(e.target.value)}
-              placeholder={t('compose.subjectPh')}
+              aria-label={t('compose.subject')} placeholder={t('compose.subjectPh')}
               style={mobileInputStyle}
             />
           </div>
@@ -2739,7 +2739,7 @@ export default function ComposeModal() {
         <div data-modal-scrim="" onClick={() => setShowHeaderActions(false)} style={{ position: 'fixed', inset: 0, zIndex: 2100, background: 'var(--overlay-scrim)' }} />
         <MaterialDialog sheet className="md-compose-header-actions" aria-label={t('message.more')} onClose={() => setShowHeaderActions(false)}
           onKeyDown={event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); event.stopPropagation(); } }}
-          style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 2101, padding: 16, animation: 'sheet-enter var(--motion-normal) var(--ease-emphasized) both' }}>
+          style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 2101, padding: 16, animation: 'sheet-enter var(--md-sys-motion-default-spatial) both' }}>
           <MaterialButton type="button" variant="menu" onClick={() => { setShowHeaderActions(false); setShowPrioritySheet(true); }}><MaterialIcon name="flag" />{t('compose.priority')}</MaterialButton>
           <MaterialButton type="button" variant="menu" disabled={sendDisabled} onClick={() => { setShowHeaderActions(false); setSendLaterView('root'); setSendLaterOpen(true); }}><SendLaterIcon />{scheduledEdit ? t('compose.scheduleSend.edit.options') : t('compose.scheduleSend.title')}</MaterialButton>
           {!scheduledEdit && <MaterialButton type="button" variant="menu" disabled={discarding} onClick={() => { setShowHeaderActions(false); requestDiscard(true); }}><MaterialIcon name="delete" />{t('compose.discard')}</MaterialButton>}
@@ -2760,7 +2760,7 @@ export default function ComposeModal() {
             borderRadius: '16px 16px 0 0',
             paddingBottom: 'calc(var(--sab) + 8px)',
             boxShadow: 'var(--shadow-modal)',
-            animation: 'sheet-enter 0.22s var(--ease-emphasized) both',
+            animation: 'sheet-enter var(--md-sys-motion-default-spatial) both',
           }}>
             <div style={{ padding: '16px 20px 8px', fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-subtle)' }}>
               {closeAsks ? t('compose.closeDraft.title') : t('compose.discardDraft.title')}
@@ -2795,7 +2795,7 @@ export default function ComposeModal() {
       {showAttachWarnForDraft && (
         <>
           <div data-modal-scrim="" onClick={() => setShowAttachWarnForDraft(false)} style={{ position: 'fixed', inset: 0, zIndex: 2100, background: 'rgba(0,0,0,0.4)' }} />
-          <MaterialDialog aria-label={t('compose.saveDraft')} onClose={() => setShowAttachWarnForDraft(false)} sheet style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 2101, background: 'var(--bg-elevated)', borderRadius: '16px 16px 0 0', paddingBottom: 'calc(var(--sab) + 8px)', boxShadow: 'var(--shadow-modal)', animation: 'sheet-enter 0.22s var(--ease-emphasized) both' }}>
+          <MaterialDialog aria-label={t('compose.saveDraft')} onClose={() => setShowAttachWarnForDraft(false)} sheet style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 2101, background: 'var(--bg-elevated)', borderRadius: '16px 16px 0 0', paddingBottom: 'calc(var(--sab) + 8px)', boxShadow: 'var(--shadow-modal)', animation: 'sheet-enter var(--md-sys-motion-default-spatial) both' }}>
             <div style={{ padding: '16px 20px 4px', fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-subtle)' }}>
               {t('compose.saveDraft')}
             </div>
@@ -2832,7 +2832,7 @@ export default function ComposeModal() {
             borderRadius: '16px 16px 0 0',
             paddingBottom: 'calc(var(--sab) + 8px)',
             boxShadow: 'var(--shadow-modal)',
-            animation: 'sheet-enter 0.22s var(--ease-emphasized) both',
+            animation: 'sheet-enter var(--md-sys-motion-default-spatial) both',
           }}>
             <div style={{ padding: '16px 20px 8px', fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-subtle)' }}>
               {t('compose.emptySubject.title')}
@@ -2866,7 +2866,7 @@ export default function ComposeModal() {
             borderRadius: '16px 16px 0 0',
             paddingBottom: 'calc(var(--sab) + 8px)',
             boxShadow: 'var(--shadow-modal)',
-            animation: 'sheet-enter 0.22s var(--ease-emphasized) both',
+            animation: 'sheet-enter var(--md-sys-motion-default-spatial) both',
           }}>
             <div style={{ padding: '16px 20px 4px', fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-subtle)' }}>
               {t('compose.forgottenAttachment.title')}
@@ -2894,7 +2894,7 @@ export default function ComposeModal() {
       {showPrioritySheet && (
         <>
           <div data-modal-scrim="" onClick={() => setShowPrioritySheet(false)} style={{ position: 'fixed', inset: 0, zIndex: 2100, background: 'rgba(0,0,0,0.4)' }} />
-          <MaterialDialog aria-label={t('compose.priority')} onClose={() => setShowPrioritySheet(false)} sheet style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 2101, background: 'var(--bg-elevated)', borderRadius: '16px 16px 0 0', paddingBottom: 'calc(var(--sab) + 8px)', boxShadow: 'var(--shadow-modal)', animation: 'sheet-enter 0.22s var(--ease-emphasized) both' }}>
+          <MaterialDialog aria-label={t('compose.priority')} onClose={() => setShowPrioritySheet(false)} sheet style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 2101, background: 'var(--bg-elevated)', borderRadius: '16px 16px 0 0', paddingBottom: 'calc(var(--sab) + 8px)', boxShadow: 'var(--shadow-modal)', animation: 'sheet-enter var(--md-sys-motion-default-spatial) both' }}>
             <div style={{ padding: '16px 20px 8px', fontSize: 'var(--md-sys-typescale-body-large-size)', fontWeight: 600, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-subtle)' }}>
               {t('compose.priority')}
             </div>
@@ -3135,7 +3135,7 @@ export default function ComposeModal() {
           <ChipInput
             chips={toChips} onChipsChange={setToChips}
             value={toInput} onChange={setToInput}
-            placeholder={t('compose.toPh')}
+            label={t('compose.to')} placeholder={t('compose.toPh')}
             autoFocus={initialFocus === 'to'}
             inputStyle={{ ...inputStyle, borderBottom: 'none', padding: '6px 4px' }}
             getSuggestions={getSuggestions}
@@ -3163,7 +3163,7 @@ export default function ComposeModal() {
             <ChipInput
               chips={ccChips} onChipsChange={setCcChips}
               value={ccInput} onChange={setCcInput}
-              placeholder={t('compose.ccPh')}
+              label={t('compose.cc')} placeholder={t('compose.ccPh')}
               inputRef={ccInputRef}
               inputStyle={{ ...inputStyle, borderBottom: 'none', padding: '6px 4px' }}
               getSuggestions={getSuggestions}
@@ -3178,7 +3178,7 @@ export default function ComposeModal() {
             <ChipInput
               chips={bccChips} onChipsChange={setBccChips}
               value={bccInput} onChange={setBccInput}
-              placeholder={t('compose.bccPh')}
+              label={t('compose.bcc')} placeholder={t('compose.bccPh')}
               inputRef={bccInputRef}
               inputStyle={{ ...inputStyle, borderBottom: 'none', padding: '6px 4px' }}
               getSuggestions={getSuggestions}
@@ -3321,7 +3321,7 @@ export default function ComposeModal() {
         display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
       }}>
         {/* Split Send button: the chevron opens Send later (design 5.1, 5.4). */}
-        <div className="md-compose-send" style={{ position: 'relative', display: 'flex', flexShrink: 0 }}>
+        <div className="md-compose-send md-split-button" style={{ position: 'relative', display: 'flex', flexShrink: 0 }}>
           <MaterialButton variant="filled"
             onClick={() => handleSend()}
             disabled={sendDisabled}
@@ -3331,7 +3331,6 @@ export default function ComposeModal() {
               border: 'none', borderRadius: '7px 0 0 7px', color: 'var(--accent-text)',
               fontSize: 'var(--md-sys-typescale-body-medium-size)', fontWeight: 500,
               cursor: sendDisabled ? 'not-allowed' : 'pointer',
-              opacity: sendDisabled ? 0.6 : 1,
               display: 'flex', alignItems: 'center', gap: 6,
               transition: 'opacity 0.15s',
             }}
@@ -3354,7 +3353,6 @@ export default function ComposeModal() {
               border: 'none', borderLeft: '1px solid rgba(255,255,255,0.28)', borderRadius: '0 7px 7px 0',
               color: 'var(--accent-text)', display: 'flex', alignItems: 'center',
               cursor: sendDisabled ? 'not-allowed' : 'pointer',
-              opacity: sendDisabled ? 0.6 : 1,
               transition: 'opacity 0.15s',
             }}
           >
@@ -4487,7 +4485,7 @@ function AttachmentChips({ attachments, onRemove, mobile }) {
   );
 }
 
-function ChipInput({ chips, onChipsChange, value, onChange, placeholder, autoFocus, inputRef: givenInputRef, inputStyle, getSuggestions, containerStyle }) {
+function ChipInput({ chips, onChipsChange, value, onChange, label, placeholder, autoFocus, inputRef: givenInputRef, inputStyle, getSuggestions, containerStyle }) {
   const { t } = useTranslation();
   const uiScale = useUiScale();
   const [suggestions, setSuggestions] = useState([]);
@@ -4647,7 +4645,7 @@ function ChipInput({ chips, onChipsChange, value, onChange, placeholder, autoFoc
         onChange={e => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
         onBlur={commitInput}
-        aria-label={placeholder}
+        aria-label={label}
         placeholder={chips.length ? '' : placeholder}
         autoFocus={autoFocus}
         style={{ ...inputStyle, flex: '1 1 32px', minWidth: 32 }}

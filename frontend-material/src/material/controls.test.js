@@ -12,6 +12,7 @@ registerHooks({ load(url, context, next) {
   return next(url, context);
 } });
 const { MaterialButton, MaterialInput, MaterialProgress, MaterialSelect } = await import('./controls.jsx');
+const { default: PaneResizeHandle } = await import('./PaneResizeHandle.jsx');
 const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
 globalThis.window = dom.window; globalThis.document = dom.window.document;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -172,4 +173,29 @@ test('Escape on an open native select reaches its picker before the parent dialo
     await React.act(async () => select.dispatchEvent(key()));
     assert.equal(escaped, 1, 'a later Escape can close the parent');
   } finally { globalThis.CSS = originalCSS; }
+});
+
+
+test('pane separator moves in screen direction and reserves space for the reader', async t => {
+  const widths = [];
+  t.mock.getter(window.Element.prototype, 'clientWidth', () => 960);
+  t.mock.getter(window.HTMLElement.prototype, 'offsetWidth', () => 280);
+  await render(React.createElement('div', null,
+    React.createElement('div', { id: 'list' }),
+    React.createElement(PaneResizeHandle, {
+      paneId: 'side', label: 'Right sidebar', min: 200, max: 600, scale: 1.3,
+      reverse: true, reserve: 322, reservePane: 'list', onCommit: width => widths.push(width),
+    }),
+    React.createElement('div', { id: 'side' })));
+  const separator = document.querySelector('[role="separator"]');
+  assert.equal(separator.tabIndex, 0);
+  assert.equal(separator.getAttribute('aria-controls'), 'side');
+  assert.equal(separator.getAttribute('aria-valuenow'), '280');
+  assert.equal(separator.getAttribute('aria-valuemax'), '358');
+  for (const key of ['ArrowLeft', 'ArrowRight', 'Home', 'End']) {
+    const event = new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    await React.act(async () => separator.dispatchEvent(event));
+    assert.equal(event.defaultPrevented, true);
+  }
+  assert.deepEqual(widths, [288, 272, 200, 358]);
 });

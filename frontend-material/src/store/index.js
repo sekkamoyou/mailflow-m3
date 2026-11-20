@@ -6,7 +6,7 @@ import { api } from '../utils/api.js';
 import { signOut as signOutAndLeave } from '../utils/signOut.js';
 import { mergeCountSnapshots, adjustCountPending, expireCountPending, settleCountPending, displayCountSnapshot, mergeFolderSnapshots } from '../utils/countSnapshots.js';
 import { resolveSelectedAccount, pruneFolders } from '../utils/accountScope.js';
-import { UNDO_COMMIT_DELAY_MS } from '../utils/undoableAction.js';
+import { UNDO_COMMIT_DELAY_MS, UNDO_WINDOW_MS } from '../utils/undoableAction.js';
 import { aiRuns } from '../utils/aiRunRegistry.js';
 import { createAppearanceSlice } from './appearance.js';
 import { applyFontSize } from '../fonts.js';
@@ -721,7 +721,15 @@ export const useStore = create((set, get) => ({
   // Notifications
   notifications: [],
   addNotification: (n) => set(state => ({
-    notifications: [{ ...n, id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}` }, ...state.notifications].slice(0, 5)
+    notifications: [{
+      ...n,
+      id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      undoExpiresAt: n.onUndo ? Date.now() + (n.undoMs ?? UNDO_WINDOW_MS) : undefined,
+    }, ...state.notifications],
+  })),
+  expireNotificationUndo: (id) => set(state => ({
+    notifications: state.notifications.flatMap(n => n.id !== id ? [n]
+      : n.onUndo && n.onAction ? [{ ...n, onUndo: undefined, undoExpiresAt: undefined }] : []),
   })),
   dismissUndoNotifications: (matches = () => true) => set(state => ({
     notifications: state.notifications.filter(n => typeof n.onUndo !== 'function' || !matches(n)),

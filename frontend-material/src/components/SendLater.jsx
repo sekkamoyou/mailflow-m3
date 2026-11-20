@@ -344,7 +344,7 @@ export function SendLaterSheet({
         style={{
           position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 2101, background: 'var(--bg-elevated)',
           borderRadius: '16px 16px 0 0', paddingBottom: 'calc((var(--sab) + 8px) / var(--ui-scale, 1))', boxShadow: 'var(--shadow-modal)',
-          animation: 'sheet-enter 0.22s var(--ease-emphasized) both', overflowY: 'auto',
+          animation: 'sheet-enter var(--md-sys-motion-default-spatial) both', overflowY: 'auto',
         }}
       >
         <div id={titleId} style={{ padding: '16px 20px 8px', fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-subtle)' }}>
@@ -437,7 +437,7 @@ export function ComposeQuestion({ mobile = false, title, body, actions, onCancel
         style={mobile ? {
           position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 2101, background: 'var(--bg-elevated)',
           borderRadius: '16px 16px 0 0', paddingBottom: 'calc((var(--sab) + 8px) / var(--ui-scale, 1))', boxShadow: 'var(--shadow-modal)',
-          animation: 'sheet-enter 0.22s var(--ease-emphasized) both',
+          animation: 'sheet-enter var(--md-sys-motion-default-spatial) both',
         } : {
           position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', zIndex: 2101,
           background: 'var(--bg-elevated)', borderRadius: 12, boxShadow: 'var(--shadow-modal)',

@@ -102,8 +102,6 @@ export function useShortcutTitle() {
 // Their padding is narrow enough that the icon fits at the minimum.
 export const TOUCH_TARGET = 44;
 export const TOUCH_MIN = 32;
-const CHEVRON_MIN = 22;
-export const REPLY_SPLIT_MIN = TOUCH_MIN + CHEVRON_MIN;
 const touchSize = {
   width: TOUCH_TARGET, minWidth: TOUCH_MIN, minHeight: TOUCH_TARGET, flexShrink: 1, padding: '6px 4px', boxSizing: 'border-box',
 };
@@ -155,7 +153,7 @@ export function ActionBtn({
 // closes it and lets focus move on. `children(choose)`: choose(run) closes, refocuses, then runs.
 function MenuPopup({ triggerRef, onClose, align = 'start', minWidth = 150, children }) {
   const menuRef = useRef(null);
-  const items = () => [...(menuRef.current?.querySelectorAll('[role="menuitem"]') || [])];
+  const items = () => [...(menuRef.current?.querySelectorAll('[role="menuitem"], [role="menuitemcheckbox"]') || [])];
   const scale = useUiScale();
   useLayoutEffect(() => {
     const trigger = triggerRef.current;
@@ -229,7 +227,7 @@ export function ReplySplitButton({ defaultReplyAll, onReply, title, touch = fals
     ? { label: t('message.reply'), replyAll: false }
     : { label: t('message.replyAll'), replyAll: true };
   return (
-    <div className="md-reply-actions" style={{ display: 'flex', alignItems: 'center', ...(touch ? { minWidth: REPLY_SPLIT_MIN } : {}) }}>
+    <div className="md-reply-actions md-split-button">
       <ActionBtn onClick={() => { setOpen(false); onReply(defaultReplyAll); }} label={label} title={title ?? label} touch={touch}>
         {defaultReplyAll ? <ReplyAllIcon /> : <ReplyIcon />}
       </ActionBtn>
@@ -313,7 +311,7 @@ function AiMenuButton({ ai, touch }) {
 
 // The phone More menu's order, the reading pane's since before the views shared these buttons: the
 // read toggle first, as the action reached for most. Reply with AI is a toolbar button on a desktop.
-export const MORE_MENU_ORDER = ['read', 'aiReply', 'spam', 'ham', 'todoist', 'headers', 'print', 'dark', 'eml'];
+export const MORE_MENU_ORDER = ['read', 'aiReply', 'forward', 'move', 'star', 'spam', 'ham', 'todoist', 'headers', 'print', 'dark', 'eml', 'delete'];
 
 // The message's tools: buttons on a desktop, a More menu on a phone, where the toolbar has no room.
 //
@@ -342,7 +340,7 @@ export function MessageTools({ isMobile, items, ai = null }) {
   const aiItems = ai ? ai.items : [];
   const all = [
     ...menuItems.map(item => ({
-      key: item.key, label: item.label, icon: item.icon, disabled: item.disabled, run: item.onClick,
+      ...item, run: item.onClick,
     })),
     ...aiItems.map(a => ({ key: `ai-${a.id}`, label: a.label, icon: <AiIcon />, run: () => ai.onRun(a) })),
   ];
@@ -362,7 +360,9 @@ export function MessageTools({ isMobile, items, ai = null }) {
             <MaterialButton variant="menu"
               key={item.key}
               type="button"
-              role="menuitem"
+              role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+              aria-checked={item.checked}
+              data-danger={item.danger || undefined}
               aria-disabled={item.disabled || undefined}
               onClick={() => choose(() => { if (!item.disabled) item.run(); })}
               style={menuItemStyle({

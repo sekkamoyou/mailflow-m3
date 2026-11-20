@@ -5,6 +5,8 @@ import MaterialDialog from './MaterialDialog.jsx';
 import { MaterialButton, MaterialIcon, MaterialInput } from './controls.jsx';
 import { htmlLang } from '../utils/browserLanguage.js';
 
+const narrowCalendar = '(max-width: 335px)';
+
 const dateValue = date => `${String(date.getFullYear()).padStart(4, '0')}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const parseDate = value => {
   const [year, month, day] = value.split('-').map(Number);
@@ -54,10 +56,27 @@ function Picker({ id, input, label, locale, onClose }) {
   const [month, setMonth] = useState(initialDate.slice(0, 7));
   const [hour, setHour] = useState(initialTime.slice(0, 2));
   const [minute, setMinute] = useState(initialTime.slice(3, 5));
+  // Seven adjacent 48px day targets need at least 336px.
+  const [narrow, setNarrow] = useState(() => Boolean(input.ownerDocument.defaultView.matchMedia?.(narrowCalendar).matches));
   const [textMode, setTextMode] = useState(false);
+  const showDateText = narrow || textMode;
+  useLayoutEffect(() => {
+    const media = input.ownerDocument.defaultView.matchMedia?.(narrowCalendar);
+    const onChange = event => setNarrow(event.matches);
+    media?.addEventListener?.('change', onChange);
+    return () => media?.removeEventListener?.('change', onChange);
+  }, [input]);
   const [error, setError] = useState('');
   const calendar = useRef(null);
   const pendingFocus = useRef(null);
+  const dateText = useRef(null);
+  const previousDateView = useRef(showDateText);
+  useLayoutEffect(() => {
+    if (previousDateView.current === showDateText) return;
+    previousDateView.current = showDateText;
+    const field = showDateText ? dateText.current : calendar.current?.querySelector('[tabindex="0"]');
+    field?.focus();
+  }, [showDateText]);
   useLayoutEffect(() => {
     if (!pendingFocus.current) return;
     calendar.current?.querySelector(`[data-date="${pendingFocus.current}"]`)?.focus();
@@ -117,7 +136,7 @@ function Picker({ id, input, label, locale, onClose }) {
     } else return;
     event.preventDefault(); focusDate(next);
   };
-  return <div className="md-picker-scrim" onMouseDown={event => { event.stopPropagation(); if (event.target === event.currentTarget) onClose(); }}
+  return <div className="md-picker-scrim" data-date-picker="" onMouseDown={event => { event.stopPropagation(); if (event.target === event.currentTarget) onClose(); }}
     onClick={event => event.stopPropagation()}>
     <MaterialDialog id={id} className="md-picker" onClose={onClose} aria-labelledby={`${id}-title`} aria-describedby={error ? `${id}-error` : undefined}
       onKeyDown={event => {
@@ -131,11 +150,11 @@ function Picker({ id, input, label, locale, onClose }) {
       <header className="md-picker-header">
         <h2 id={`${id}-title`}>{label}</h2>
         {hasDate && <div className="md-picker-headline"><span>{validDate ? new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', weekday: 'short' }).format(parseDate(date)) : t('compose.scheduleSend.dateLabel')}</span>
-          <MaterialButton type="button" variant="icon" aria-label={t(textMode ? 'materialPicker.calendar' : 'materialPicker.typeDate')}
-            onClick={() => setTextMode(!textMode)}><MaterialIcon name={textMode ? 'calendar_month' : 'edit'} /></MaterialButton></div>}
+          {!narrow && <MaterialButton type="button" variant="icon" aria-label={t(textMode ? 'materialPicker.calendar' : 'materialPicker.typeDate')}
+            onClick={() => setTextMode(!textMode)}><MaterialIcon name={textMode ? 'calendar_month' : 'edit'} /></MaterialButton>}</div>}
       </header>
-      {hasDate && (textMode ? <div className="md-picker-date-text"><label className="md-field-label" htmlFor={`${id}-date`}>{t('compose.scheduleSend.dateLabel')}</label>
-        <MaterialInput id={`${id}-date`} type="text" placeholder="YYYY-MM-DD" value={date} aria-invalid={!validDate || undefined}
+      {hasDate && (showDateText ? <div className="md-picker-date-text"><label className="md-field-label" htmlFor={`${id}-date`}>{t('compose.scheduleSend.dateLabel')}</label>
+        <MaterialInput ref={dateText} data-autofocus="" id={`${id}-date`} type="text" placeholder="YYYY-MM-DD" value={date} aria-invalid={!validDate || undefined}
           aria-describedby={`${id}-date-format`} onChange={event => { const next = event.target.value; setDate(next); if (/^\d{4}-\d{2}-\d{2}$/.test(next) && dateValue(parseDate(next)) === next) setMonth(next.slice(0, 7)); }} />
         <span id={`${id}-date-format`} className="md-supporting-text">YYYY-MM-DD</span></div> : <div className="md-picker-calendar" ref={calendar} onKeyDown={calendarKey}>
         <div className="md-picker-month"><span aria-live="polite">{new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(current)}</span>

@@ -1,3 +1,4 @@
+import MaterialNavigation from '../material/Navigation.jsx';
 import { useModalFocus } from '../material/useModalFocus.js';
 import { useMenuFocus } from '../material/useMenuFocus.js';
 import MaterialDialog from '../material/MaterialDialog.jsx';
@@ -249,14 +250,14 @@ function badgeStyle(badge) {
     : { fontSize: 10, color: 'var(--text-tertiary)', background: 'var(--bg-elevated)', padding: '1px 5px', borderRadius: 8 };
 }
 
-export default function Sidebar({ onClose } = {}) {
+export default function Sidebar({ onClose, expandedRail = false } = {}) {
   const { t } = useTranslation();
   const appDisplayName = useStore(state => state.appDisplayName);
   const uiScale = useUiScale();
   const {
     accounts, unreadCounts, selectedAccountId, selectedFolder,
-    setSelectedAccount, setShowContacts, setShowAdmin, setAdminTab, setAccountsIntent, openCompose,
-    folders, setFolders, setAccounts, user, signOut, lockScreen, sidebarCollapsed: sidebarCollapsedPref, toggleSidebar,
+    setSelectedAccount, setShowAdmin, setAdminTab, setAccountsIntent, openCompose,
+    folders, setFolders, setAccounts, user, messagesRefreshToken, signOut, lockScreen, sidebarCollapsed: sidebarCollapsedPref, toggleSidebar,
     blockRemoteImages, setBlockRemoteImages, setMobileSidebarOpen, addNotification,
     searchAllFolders, setSearchAllFolders,
     hiddenFolders, setHiddenFolders,
@@ -271,12 +272,13 @@ export default function Sidebar({ onClose } = {}) {
 
   const isMobile = useMobile();
   // On mobile the sidebar is always expanded (shown as an overlay drawer)
-  const sidebarCollapsed = isMobile ? false : sidebarCollapsedPref;
+  const sidebarCollapsed = !isMobile && !onClose && sidebarCollapsedPref;
 
   // Close the mobile drawer whenever the user navigates to a different folder/account
   useEffect(() => {
-    if (isMobile) setMobileSidebarOpen(false);
-  }, [selectedAccountId, selectedFolder]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (onClose) onClose();
+    else if (isMobile) setMobileSidebarOpen(false);
+  }, [selectedAccountId, selectedFolder, messagesRefreshToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [msgDragTarget, setMsgDragTarget] = useState(null);
   const [folderDrag, setFolderDrag] = useState(null);
@@ -852,7 +854,7 @@ export default function Sidebar({ onClose } = {}) {
       borderRight: '1px solid var(--border-subtle)',
       display: 'flex',
       flexDirection: 'column',
-      transition: isSidebarResizing ? 'none' : 'width 0.2s ease, min-width 0.2s ease',
+      transition: isSidebarResizing ? 'none' : 'width var(--md-sys-motion-default-spatial-standard), min-width var(--md-sys-motion-default-spatial-standard)',
       overflow: 'hidden',
     }}>
       {/* Header */}
@@ -911,14 +913,9 @@ export default function Sidebar({ onClose } = {}) {
         </MaterialButton>
       </div>
 
-      {/* Nav */}
+      {expandedRail && <MaterialNavigation layout={sidebarCollapsed ? 'rail' : 'expanded'} />}
+
       <nav data-mailbox-sidebar="" style={{ flex: 1, overflow: 'hidden auto', padding: '4px 8px' }}>
-        {isMobile && <>
-          <NavItem icon={<MaterialIcon name="contacts" />} label={t('contacts.title')}
-            active={showContacts} collapsed={false}
-            onClick={() => { setShowContacts(true); setShowAdmin(false); setMobileSidebarOpen(false); }} />
-          <div role="separator" style={{ borderTop: '1px solid var(--border-subtle)', margin: '8px 12px' }} />
-        </>}
         {/* Unified Inbox — only shown with 2+ enabled accounts */}
         {accounts.filter(a => a.enabled).length >= 2 && (
           <NavItem

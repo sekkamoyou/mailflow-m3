@@ -3,7 +3,7 @@ import { useRef, useEffect, useCallback } from 'react';
 const SWIPE_THRESHOLD = 72;
 
 export function isInteractiveSwipeTarget(target) {
-  return Boolean(target?.closest?.('button, input, select, textarea, a, [role="button"]'));
+  return Boolean(target?.closest?.('button:not([data-message-open]), input, select, textarea, a, [role="button"]'));
 }
 
 export function useSwipeRow({ isMobile, message, onSwipeLeft, onSwipeRight, onLongPress, onTap, onGesture }) {
