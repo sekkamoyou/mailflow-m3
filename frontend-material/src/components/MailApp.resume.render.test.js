@@ -152,7 +152,7 @@ describe('MailApp: returning to the tab', () => {
   });
 });
 
-test('compact views have two primary destinations, the medium rail adds settings and folders, and desktop expands the rail', async () => {
+test('mobile has no bottom navigation or rail, and desktop keeps its folder navigation', async () => {
   const width = window.innerWidth;
   const mountAt = async width => {
     await React.act(async () => root.render(null));
@@ -160,15 +160,13 @@ test('compact views have two primary destinations, the medium rail adds settings
     await React.act(async () => root.render(React.createElement(MailApp)));
   };
   try {
-    await mountAt(416);
-    const bar = '.material-app-inner[data-primary-view] > .material-navigation[data-layout=bar]';
-    assert.equal(document.querySelectorAll(bar + ' button').length, 2);
-    assert.equal(Boolean(document.querySelector('.material-app-header')), false);
-    await React.act(async () => useStore.getState().setSelectedMessage('reader-message'));
-    assert.equal(Boolean(document.querySelector(bar)), false);
-    await React.act(async () => useStore.getState().setSelectedMessage(null));
+    for (const width of [416, 700, 839]) {
+      await mountAt(width);
+      assert.equal(Boolean(document.querySelector('.material-navigation')), false, `no bottom bar or rail at ${width}px`);
+      assert.equal(Boolean(document.querySelector('.material-app-header')), false);
+    }
 
-    await mountAt(700);
+    await mountAt(840);
     const rail = '.material-workspace > .material-navigation[data-layout=rail]';
     assert.equal(document.querySelectorAll(rail + ' button').length, 4);
     assert.equal(Boolean(document.querySelector(rail + ' [aria-controls=material-folder-pane]')), true);

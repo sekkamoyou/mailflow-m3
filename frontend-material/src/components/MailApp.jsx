@@ -820,7 +820,7 @@ export default function MailApp() {
       width: '100vw', height: 'var(--app-height, 100svh)',
       overflow: 'hidden', background: 'var(--bg-primary)',
     }}>
-    <div className="material-app-inner" data-ui-scale-root="" data-primary-view={showContacts || !selectedMessageId || undefined}
+    <div className="material-app-inner" data-ui-scale-root=""
       data-mail-list-view={!showContacts && !selectedMessageId || undefined} style={{
       '--ui-scale': scale,
       display: 'flex',
@@ -848,7 +848,7 @@ export default function MailApp() {
         <div className="material-global-search" ref={setSearchHost} style={{ visibility: showContacts ? 'hidden' : undefined }} />
       </header>}
       <div className="material-workspace" ref={workspaceRef}>
-      {overlayDrawer && <MaterialNavigation layout="rail" onToggleFolders={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+      {!isMobile && overlayDrawer && <MaterialNavigation layout="rail" onToggleFolders={() => setMobileSidebarOpen(!mobileSidebarOpen)}
         foldersOpen={mobileSidebarOpen} />}
       {isMobile ? (
         <>
@@ -1008,7 +1008,6 @@ export default function MailApp() {
 
       </div>
 
-      <MaterialNavigation layout="bar" />
       <InboxReplyDraftObserver />
       <Suspense fallback={lazyFallback}>{composing && <ComposeModal key={composeSession} />}</Suspense>
       <Suspense fallback={lazyFallback}>{showAdmin && <AdminPanel />}</Suspense>

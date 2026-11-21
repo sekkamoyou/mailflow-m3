@@ -256,7 +256,7 @@ export default function Sidebar({ onClose, expandedRail = false } = {}) {
   const uiScale = useUiScale();
   const {
     accounts, unreadCounts, selectedAccountId, selectedFolder,
-    setSelectedAccount, setShowAdmin, setAdminTab, setAccountsIntent, openCompose,
+    setSelectedAccount, setShowContacts, setShowAdmin, setAdminTab, setAccountsIntent, openCompose,
     folders, setFolders, setAccounts, user, messagesRefreshToken, signOut, lockScreen, sidebarCollapsed: sidebarCollapsedPref, toggleSidebar,
     blockRemoteImages, setBlockRemoteImages, setMobileSidebarOpen, addNotification,
     searchAllFolders, setSearchAllFolders,
@@ -916,6 +916,12 @@ export default function Sidebar({ onClose, expandedRail = false } = {}) {
       {expandedRail && <MaterialNavigation layout={sidebarCollapsed ? 'rail' : 'expanded'} />}
 
       <nav data-mailbox-sidebar="" style={{ flex: 1, overflow: 'hidden auto', padding: '4px 8px' }}>
+        {isMobile && <>
+          <NavItem icon={<MaterialIcon name="contacts" />} label={t('contacts.title')}
+            active={showContacts} collapsed={false}
+            onClick={() => { setShowContacts(true); setShowAdmin(false); setMobileSidebarOpen(false); }} />
+          <div role="separator" style={{ borderTop: '1px solid var(--border-subtle)', margin: '8px 12px' }} />
+        </>}
         {/* Unified Inbox — only shown with 2+ enabled accounts */}
         {accounts.filter(a => a.enabled).length >= 2 && (
           <NavItem
