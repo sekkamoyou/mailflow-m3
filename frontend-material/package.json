@@ -2,7 +2,7 @@
   "name": "mailflow-m3",
   "productName": "MailFlow M3",
   "desktopName": "MailFlow M3",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Independent Material 3 web frontend for MailFlow",
   "homepage": "https://github.com/sekkamoyou/mailflow-m3",
   "author": {

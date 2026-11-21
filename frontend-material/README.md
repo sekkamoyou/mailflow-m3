@@ -20,6 +20,10 @@ The dev server listens on `http://127.0.0.1:5174`. Set the backend's `APP_URL` a
 
 Set `VITE_FRONTEND_SOURCE_URL` and `VITE_BACKEND_SOURCE_URL` at build time to URLs for the exact deployed commits or release tags. Settings → About shows both links. Docker and Compose accept the same values as build arguments.
 
+## Frontend releases
+
+The frontend version shown in Settings → About comes from `package.json`. Before releasing a user-visible change, choose the next frontend version and update `package.json` and the root version entries in `package-lock.json` together. Use a patch release for fixes and a minor release for new features. After verification, create a new `vMAJOR.MINOR.PATCH` tag on the release commit, such as `v0.2.0` for version `0.2.0`. Keep published tags on their original commits.
+
 ## License
 
 MailFlow M3 is distributed under the [GNU Affero General Public License v3](LICENSE), with no warranty. The [upstream commercial license text](LICENSE-COMMERCIAL) records the original author's separate licensing option for upstream MailFlow.

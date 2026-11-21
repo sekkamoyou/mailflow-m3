@@ -75,8 +75,8 @@ Serve `frontend-material/dist/` with a reverse proxy and follow the [frontend gu
 
 ## Versions and build information
 
-- **Frontend** — [`v0.1`](https://github.com/sekkamoyou/mailflow-m3/tree/v0.1) is the initial frontend tag. The frontend package version shown in **Settings → About** is `0.1.0`.
-- **Backend** — **Settings → About** displays the upstream API version with the fork suffix, for example `v4.5.1-m3`. The `4.5.1-m3` tag pins the backend merge. The backend build is the first seven characters of the SHA reported by `/api/version`. The frontend build is derived from `VITE_BUILD_SHA`.
+- **Frontend** — Frontend releases use `vMAJOR.MINOR.PATCH` tags, such as [`v0.1.0`](https://github.com/sekkamoyou/mailflow-m3/tree/v0.1.0) and [`v0.2.0`](https://github.com/sekkamoyou/mailflow-m3/tree/v0.2.0). **Settings → About** shows the package version `0.2.0`.
+- **Backend** — **Settings → About** displays the upstream API version with the fork suffix, for example `v4.5.1-m3`. Backend release tags append `-m3` to the full upstream tag, for example `v4.5.1-m3` for upstream `v4.5.1`. The backend build is the first seven characters of the SHA reported by `/api/version`. The frontend build is derived from `VITE_BUILD_SHA`.
 - **Source links** — **Settings → About** uses the two source URLs set at frontend build time. Point each URL to the exact deployed revision and refresh the relevant link when a deployment changes it.
 
 ## License and third-party notices
