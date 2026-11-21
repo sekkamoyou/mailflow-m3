@@ -84,6 +84,7 @@ test('About is available to regular users and separates versions from short buil
     await React.act(async () => root.render(React.createElement(AdminPanel)));
     const about = [...document.querySelectorAll('button')].find(button => button.textContent.includes('admin.tabs.about'));
     assert.ok(about);
+    assert.equal(about.dataset.variant, 'navigation');
     await React.act(async () => about.click());
     const frontendVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
     assert.equal(rowValue('admin.about.frontendVersion'), frontendVersion);

@@ -8861,7 +8861,7 @@ export default function AdminPanel() {
           {visibleTabs.filter(tab => !TAB_GROUPS.some(g => g.tabIds.includes(tab.id))).map(tab => {
             const isActive = adminTab === tab.id && !searchResults;
             return (
-              <MaterialButton selected={isActive} aria-pressed={Boolean(isActive)} aria-current={isActive ? 'page' : undefined} variant="text"
+              <MaterialButton selected={isActive} aria-pressed={Boolean(isActive)} aria-current={isActive ? 'page' : undefined} variant="navigation"
                 className={isActive ? 'admin-tab admin-tab-active' : 'admin-tab'}
                 key={tab.id}
                 onClick={() => handleTabClick(tab.id)}
