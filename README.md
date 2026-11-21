@@ -21,10 +21,10 @@ The screenshots use sample mailboxes. Select an image to open it at full size.
   <a href="media/mailflow-m3-compose.png"><img src="media/mailflow-m3-compose.png" width="393" alt="Message composition window with a sample recipient, formatted body controls, and Send button"></a>
 </p>
 
-### Mobile folder navigation and push priority
+### Mobile inbox and push priority
 
 <p align="center">
-  <a href="media/mailflow-m3-mobile.png"><img src="media/mailflow-m3-mobile.png" width="205" alt="Mobile navigation drawer with the Studio Inbox folders expanded in dark mode"></a>
+  <a href="media/mailflow-m3-mobile.png"><img src="media/mailflow-m3-mobile.png" width="205" alt="MailFlow M3 mobile inbox with sample messages and a hamburger menu"></a>
   <a href="media/mailflow-m3-push-priority.png"><img src="media/mailflow-m3-push-priority.png" width="450" alt="Push priority by category with Primary set to High and Newsletters set to Low"></a>
 </p>
 
