@@ -1,6 +1,8 @@
 # MailFlow M3
 
-MailFlow M3 is a self-hosted webmail client with a Material 3 interface and a companion backend. It is an independently maintained fork of [MailFlow v4.5.1 by Matthias and contributors](https://github.com/maathimself/mailflow/releases/tag/v4.5.1) (`3c6b67e`).
+MailFlow M3 is a self-hosted webmail client with a Material 3 interface and a companion backend. It is an independently maintained fork of [MailFlow by Matthias and contributors](https://github.com/maathimself/mailflow).
+
+[Latest MailFlow M3 release](https://github.com/sekkamoyou/mailflow-m3/releases/latest)
 
 [Run MailFlow M3](#run-mailflow-m3) · [Versions and build information](#versions-and-build-information) · [License and third-party notices](#license-and-third-party-notices) · [Upstream MailFlow reference](#upstream-mailflow-reference)
 
@@ -31,21 +33,27 @@ The screenshots use sample mailboxes. Select an image to open it at full size.
 - **Web interface** — Material 3 navigation, controls, and dialogs for desktop and mobile, with refined Korean UI text.
 - **Appearance** — synchronize preferences between devices or keep separate desktop and mobile settings. Administrators can customize instance branding.
 - **Messages and notifications** — message-list previews and metadata, notification avatars, configurable push priority by mail category, and dismissal of an individual PWA notification after its message is marked read.
-- **MailFlow 4.5 features** — message tags, reusable snippets through the Templates plugin, outgoing notification webhooks, label actions in rules, sign-in duration and time-format preferences, and push-triggered reconnection.
-- **Backend compatibility** — OpenCode Go support, Yahoo Japan IMAP provider detection, NAVER empty-folder handling, and fixes for reconciling messages deleted in other mail clients. The fork uses the upstream v4.5.1 database migrations.
+- **Mail features** — message tags, reusable snippets through the Templates plugin, outgoing notification webhooks, label actions in rules, sign-in duration and time-format preferences, and push-triggered reconnection.
+- **Backend compatibility** — OpenCode Go support, Yahoo Japan IMAP provider detection, NAVER empty-folder handling, and fixes for reconciling messages deleted in other mail clients.
 
 ## Run MailFlow M3
 
-The [M3 web frontend](frontend-material/) and [companion backend](backend/) are in this repository. From a fresh clone, record the exact source revision for both builds:
+Use the **MailFlow M3 frontend with a compatible MailFlow M3 backend**. Choose a tested pair from the release notes and replace the two tag placeholders below.
 
 ```sh
-git clone --branch mailflow-m3 https://github.com/sekkamoyou/mailflow-m3.git
-cd mailflow-m3
-
-export GIT_SHA="$(git rev-parse HEAD)"
 repo=https://github.com/sekkamoyou/mailflow-m3
-export VITE_FRONTEND_SOURCE_URL="$repo/tree/$GIT_SHA/frontend-material"
-export VITE_BACKEND_SOURCE_URL="$repo/tree/$GIT_SHA/backend"
+FRONTEND_TAG='<frontend-tag>'
+BACKEND_TAG='<backend-tag>'
+
+git clone --branch "$BACKEND_TAG" "${repo}.git" mailflow-m3
+cd mailflow-m3
+git worktree add --detach ../mailflow-m3-frontend "$FRONTEND_TAG"
+
+FRONTEND_DIR=../mailflow-m3-frontend/frontend-material
+FRONTEND_SHA="$(git rev-parse "${FRONTEND_TAG}^{commit}")"
+BACKEND_SHA="$(git rev-parse HEAD)"
+export VITE_FRONTEND_SOURCE_URL="$repo/tree/$FRONTEND_SHA/frontend-material"
+export VITE_BACKEND_SOURCE_URL="$repo/tree/$BACKEND_SHA/backend"
 ```
 
 ### Docker Compose
@@ -53,30 +61,31 @@ export VITE_BACKEND_SOURCE_URL="$repo/tree/$GIT_SHA/backend"
 For a fresh install, copy [`.env.example`](.env.example) to `.env`. Set `APP_URL` to the public HTTPS address, such as `https://mail.example.com`, and generate `SESSION_SECRET`, `DB_PASSWORD`, and `ENCRYPTION_KEY` as described in the example file. Keep the existing `.env` and database when updating an installation.
 
 ```sh
-docker compose -p mailflow-m3 up -d --build --wait backend
-MAILFLOW_NETWORK=mailflow-m3_mailflow docker compose --env-file .env \
-  -p mailflow-m3-ui -f frontend-material/compose.material.yml up -d --build
+GIT_SHA="$BACKEND_SHA" docker compose -p mailflow-m3 up -d --build --wait backend
+GIT_SHA="$FRONTEND_SHA" MAILFLOW_NETWORK=mailflow-m3_mailflow \
+  docker compose --env-file .env -p mailflow-m3-ui \
+  -f "$FRONTEND_DIR/compose.material.yml" up -d --build
 ```
 
 Point a same-host HTTPS reverse proxy to `http://127.0.0.1:8084`. Forward the public host and `X-Forwarded-Proto: https`, and enable WebSocket forwarding. The M3 frontend proxies backend routes over the shared Docker network.
 
 ### Native install
 
-Use the [upstream v4.5.1 native setup](https://github.com/maathimself/mailflow/blob/v4.5.1/README.md#option-c--native-install-no-docker) for system dependencies, PostgreSQL, and backend environment settings. Use the M3 checkout above and build the web frontend with the Node.js version listed in the [frontend build guide](frontend-material/README.md#build-and-run):
+Follow the native setup instructions for the upstream version linked in the selected M3 backend release notes. That guide covers system dependencies, PostgreSQL, and backend environment settings. Build the M3 frontend with the Node.js version listed in the [frontend build guide](frontend-material/README.md#build-and-run).
 
 ```sh
-(cd frontend-material && npm ci && VITE_BUILD_SHA="$GIT_SHA" npm run build)
-contrib/package-backend.sh "$GIT_SHA" > backend.tgz
+(cd "$FRONTEND_DIR" && npm ci && VITE_BUILD_SHA="$FRONTEND_SHA" npm run build)
+contrib/package-backend.sh "$BACKEND_SHA" > backend.tgz
 ```
 
 Extract the backend archive into the installation directory and run `npm ci --omit=dev` from its `backend/` directory. The archive includes `backend/build.env` with the packaged commit as `BUILD_SHA`. Follow the setup instructions in the [systemd service](contrib/mailflow.service) to start the backend with that build hash and the existing application configuration.
 
-Serve `frontend-material/dist/` with a reverse proxy and follow the [frontend guide](frontend-material/README.md#build-and-run) for backend routes.
+Serve `$FRONTEND_DIR/dist/` with a reverse proxy and follow the [frontend guide](frontend-material/README.md#build-and-run) for backend routes.
 
 ## Versions and build information
 
-- **Frontend** — Frontend releases use `vMAJOR.MINOR.PATCH` tags, such as [`v0.1.0`](https://github.com/sekkamoyou/mailflow-m3/tree/v0.1.0) and [`v0.2.0`](https://github.com/sekkamoyou/mailflow-m3/tree/v0.2.0). **Settings → About** shows the package version `0.2.0`.
-- **Backend** — **Settings → About** displays the upstream API version with the fork suffix, for example `v4.5.1-m3`. Backend release tags append `-m3` to the full upstream tag, for example `v4.5.1-m3` for upstream `v4.5.1`. The backend build is the first seven characters of the SHA reported by `/api/version`. The frontend build is derived from `VITE_BUILD_SHA`.
+- **Frontend** — Release tags use `vMAJOR.MINOR.PATCH`. **Settings → About** shows the package version and the short build hash derived from `VITE_BUILD_SHA`.
+- **Backend** — Release tags append `-m3` to the full upstream tag. **Settings → About** displays the version with the fork suffix and the first seven characters of the SHA reported by `/api/version`.
 - **Source links** — **Settings → About** uses the two source URLs set at frontend build time. Point each URL to the exact deployed revision and refresh the relevant link when a deployment changes it.
 
 ## License and third-party notices
