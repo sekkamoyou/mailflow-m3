@@ -234,7 +234,11 @@
 
 .md-menu-backdrop { position: fixed; inset: 0; z-index: 20999; }
 .md-menu-popup .md-button[data-danger] { color: var(--md-sys-color-error); }
-.md-menu-popup { z-index: 21000; box-sizing: border-box; padding: 8px 0; border-radius: 4px; background: var(--md-sys-color-surface-container); color: var(--md-sys-color-on-surface); box-shadow: var(--md-sys-elevation-level2); overflow: auto; }
+.md-menu-viewport {
+  position: fixed; z-index: 21000; pointer-events: none;
+  inset: calc(var(--sat, 0px) + 8px) calc(env(safe-area-inset-right, 0px) + 8px) calc(var(--sab, 0px) + 8px) calc(env(safe-area-inset-left, 0px) + 8px);
+}
+.md-menu-popup { position: absolute; pointer-events: auto; box-sizing: border-box; padding: 8px 0; border-radius: 4px; background: var(--md-sys-color-surface-container); color: var(--md-sys-color-on-surface); box-shadow: var(--md-sys-elevation-level2); overflow: auto; overscroll-behavior: contain; }
 
 .md-button:is([data-variant=filled],[data-variant=tonal],[data-variant=outlined],[data-variant=elevated],[data-variant=text],[data-variant=icon]) {
   --md-button-pressed-shape: 8px;

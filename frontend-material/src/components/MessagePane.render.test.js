@@ -904,7 +904,7 @@ describe('Reply with AI in the toolbar', () => {
   });
 
   // A phone's toolbar only just fits its buttons (#650), so there it is in More.
-  test('is in More on a phone', async () => {
+  test('offers AI reply in a compact More menu below the trigger', async () => {
     // A phone's pane pages with SwipePager, which waits a frame, and jsdom has none.
     globalThis.requestAnimationFrame ??= cb => setTimeout(() => cb(Date.now()), 0);
     globalThis.cancelAnimationFrame ??= id => clearTimeout(id);
@@ -916,6 +916,12 @@ describe('Reply with AI in the toolbar', () => {
     document.body.appendChild(container);
     dom.window.innerWidth = 375;
     const phone = createRoot(container);
+    const originalRect = dom.window.HTMLElement.prototype.getBoundingClientRect;
+    dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+      if (this.classList.contains('md-menu-viewport')) return { left: 8, top: 32, bottom: 572, width: 359, height: 540 };
+      if (this.getAttribute('aria-label') === 'message.more') return { left: 320, right: 364, top: 96, bottom: 144 };
+      return originalRect.call(this);
+    };
     const click = async el => {
       await React.act(async () => { el.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); });
       await React.act(async () => { await new Promise(r => setTimeout(r, 0)); });
@@ -928,6 +934,9 @@ describe('Reply with AI in the toolbar', () => {
       await React.act(async () => { await new Promise(r => setTimeout(r, 0)); });
       assert.ok(!container.querySelector('button[aria-label="compose.toolbar.aiReply"]'), 'not a toolbar button');
       await click(container.querySelector('button[aria-label="message.more"]'));
+      const menu = document.querySelector('[role="menu"]');
+      assert.equal(menu.style.top, '116px', 'position is relative to the safe area');
+      assert.equal(menu.style.maxHeight, '270px', 'uses at most half the available viewport on a phone');
       const items = [...document.querySelectorAll('[role="menuitem"]')];
       assert.equal(items[1]?.textContent, 'compose.toolbar.aiReply', 'after the read toggle');
       await click(items[1]);
@@ -938,6 +947,7 @@ describe('Reply with AI in the toolbar', () => {
       await React.act(async () => phone.unmount());
       container.remove();
       dom.window.innerWidth = 1024;
+      dom.window.HTMLElement.prototype.getBoundingClientRect = originalRect;
     }
   });
 
@@ -1516,8 +1526,7 @@ describe('reply options popup', () => {
     const trigger = await open();
     const menu = document.querySelector('[role="menu"]');
     assert.ok(menu);
-    assert.equal(menu.parentElement === document.body, true);
-    assert.equal(menu.style.position, 'fixed');
+    assert.equal(menu.closest('.md-menu-viewport')?.parentElement, document.body);
     assert.equal(menu.classList.contains('md-menu-popup'), true);
     assert.equal(document.activeElement.getAttribute('role'), 'menuitem');
     assert.equal(trigger.getAttribute('aria-expanded'), 'true');

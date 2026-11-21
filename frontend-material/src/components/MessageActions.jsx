@@ -155,19 +155,34 @@ function MenuPopup({ triggerRef, onClose, align = 'start', minWidth = 150, child
   const menuRef = useRef(null);
   const items = () => [...(menuRef.current?.querySelectorAll('[role="menuitem"], [role="menuitemcheckbox"]') || [])];
   const scale = useUiScale();
+  const isMobile = useMobile();
   useLayoutEffect(() => {
-    const trigger = triggerRef.current;
     const menu = menuRef.current;
-    const view = trigger.ownerDocument.defaultView;
-    const rect = trigger.getBoundingClientRect();
-    const width = menu.offsetWidth * scale;
-    const height = menu.offsetHeight * scale;
-    const left = Math.max(8, Math.min(align === 'end' ? rect.right - width : rect.left, view.innerWidth - width - 8));
-    const below = rect.bottom + 4 * scale;
-    const top = below + height <= view.innerHeight - 8 ? below : Math.max(8, rect.top - height - 4 * scale);
-    Object.assign(menu.style, { left: `${left}px`, top: `${top}px` });
+    const bounds = menu.parentElement.getBoundingClientRect();
+    const trigger = triggerRef.current.getBoundingClientRect();
+    const maxWidth = Math.min(280, bounds.width / scale);
+    menu.style.minWidth = `${Math.min(minWidth, maxWidth)}px`;
+    menu.style.maxWidth = `${maxWidth}px`;
+    const width = menu.offsetWidth;
+    const left = (align === 'end' ? trigger.right - width * scale : trigger.left) - bounds.left;
+    const below = Math.min(bounds.bottom, Math.max(bounds.top, trigger.bottom + 4 * scale));
+    const above = Math.max(bounds.top, Math.min(bounds.bottom, trigger.top - 4 * scale));
+    const belowSpace = bounds.bottom - below;
+    const aboveSpace = above - bounds.top;
+    // Keep enough of the message in view while a long menu scrolls on a phone.
+    const heightLimit = isMobile ? bounds.height / 2 : bounds.height;
+    const desiredHeight = Math.min(menu.scrollHeight * scale, heightLimit);
+    const opensBelow = desiredHeight <= belowSpace || (desiredHeight > aboveSpace && belowSpace >= aboveSpace);
+    Object.assign(menu.style, {
+      width: `${width}px`,
+      left: `${Math.max(0, Math.min(left, bounds.width - width * scale))}px`,
+      top: opensBelow ? `${below - bounds.top}px` : 'auto',
+      bottom: opensBelow ? 'auto' : `${bounds.bottom - above}px`,
+      transformOrigin: opensBelow ? 'top left' : 'bottom left',
+      maxHeight: `${Math.min(heightLimit, opensBelow ? belowSpace : aboveSpace) / scale}px`,
+    });
     items()[0]?.focus({ preventScroll: true });
-  }, [triggerRef, align, scale]);
+  }, [triggerRef, align, minWidth, scale, isMobile]);
   useEffect(() => {
     const doc = triggerRef.current.ownerDocument;
     const closeOnMove = event => { if (!menuRef.current?.contains(event.target)) onClose(); };
@@ -200,13 +215,13 @@ function MenuPopup({ triggerRef, onClose, align = 'start', minWidth = 150, child
       default: break;
     }
   };
-  const view = triggerRef.current.ownerDocument.defaultView;
   return createPortal(<>
     <div className="md-menu-backdrop" onClick={() => close()} aria-hidden />
-    <div ref={menuRef} role="menu" aria-label={triggerRef.current.getAttribute('aria-label')} className="md-menu-popup" onKeyDown={onKeyDown}
-      style={{ position: 'fixed', minWidth: Math.min(minWidth, (view.innerWidth - 16) / scale), maxWidth: Math.min(280, (view.innerWidth - 16) / scale),
-        maxHeight: (view.innerHeight - 16) / scale, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
-      {children(choose)}
+    <div className="md-menu-viewport">
+      <div ref={menuRef} role="menu" aria-label={triggerRef.current.getAttribute('aria-label')} className="md-menu-popup" onKeyDown={onKeyDown}
+        style={{ transform: `scale(${scale})` }}>
+        {children(choose)}
+      </div>
     </div>
   </>, triggerRef.current.ownerDocument.body);
 }
