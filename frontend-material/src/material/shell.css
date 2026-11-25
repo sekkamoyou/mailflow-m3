@@ -247,6 +247,8 @@ html[lang=ko] :is(.md-button, .nav-item, .admin-tab) { word-break: keep-all; }
 .material-reader-toolbar > * { flex-shrink: 0; min-width: max-content !important; }
 .material-reader-toolbar[data-compact] { flex-wrap: wrap; overflow: visible; }
 .material-reader-toolbar[data-compact] .md-button:focus-visible { outline-offset: 0; }
+.material-reader-toolbar > .md-mobile-message-tools { display: flex; align-items: center; flex: 1; min-width: 0 !important; }
+.md-mobile-message-shortcuts { display: flex; flex: 1; min-width: 0; }
 @keyframes md-reader-enter { from { transform: translateX(100%); } }
 .material-reader-back-bar { container-type: inline-size; }
 @container (max-width: 250px) {

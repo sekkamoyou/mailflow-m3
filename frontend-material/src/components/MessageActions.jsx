@@ -328,15 +328,27 @@ function AiMenuButton({ ai, touch }) {
 // read toggle first, as the action reached for most. Reply with AI is a toolbar button on a desktop.
 export const MORE_MENU_ORDER = ['read', 'aiReply', 'forward', 'move', 'star', 'spam', 'ham', 'todoist', 'headers', 'print', 'dark', 'eml', 'delete'];
 
-// The message's tools: buttons on a desktop, a More menu on a phone, where the toolbar has no room.
-//
-// items: [{ key, label, title?, icon, onClick, disabled?, pressed? }], in toolbar order; the More
-// menu lists them in MORE_MENU_ORDER. ai: null, or { items, results, onRun, onManage? }: the AI
-// dropdown on a desktop, its actions as menu items on a phone.
-export function MessageTools({ isMobile, items, ai = null }) {
+// One Material icon button, including its inline margins.
+const MOBILE_ACTION_SLOT = 48;
+
+// On a phone, mobileToolbarItems fill the space left after the fixed controls and More button.
+// The rest join the usual More actions and keep their existing menu order.
+export function MessageTools({ isMobile, items, ai = null, mobileToolbarItems = [] }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [toolbarCount, setToolbarCount] = useState(0);
   const triggerRef = useRef(null);
+  const toolbarSpace = useRef(null);
+  const itemCount = mobileToolbarItems.length;
+  useLayoutEffect(() => {
+    const space = toolbarSpace.current;
+    if (!isMobile || !space) return;
+    const measure = width => setToolbarCount(Math.min(itemCount, Math.floor(width / MOBILE_ACTION_SLOT)));
+    measure(space.clientWidth);
+    const observer = new space.ownerDocument.defaultView.ResizeObserver(([entry]) => measure(entry.contentRect.width));
+    observer.observe(space);
+    return () => observer.disconnect();
+  }, [isMobile, itemCount]);
   if (!isMobile) {
     return (
       <>
@@ -351,7 +363,7 @@ export function MessageTools({ isMobile, items, ai = null }) {
     );
   }
   const rank = key => (MORE_MENU_ORDER.includes(key) ? MORE_MENU_ORDER.indexOf(key) : MORE_MENU_ORDER.length);
-  const menuItems = [...items].sort((a, b) => rank(a.key) - rank(b.key));
+  const menuItems = [...items, ...mobileToolbarItems.slice(toolbarCount)].sort((a, b) => rank(a.key) - rank(b.key));
   const aiItems = ai ? ai.items : [];
   const all = [
     ...menuItems.map(item => ({
@@ -359,9 +371,8 @@ export function MessageTools({ isMobile, items, ai = null }) {
     })),
     ...aiItems.map(a => ({ key: `ai-${a.id}`, label: a.label, icon: <AiIcon />, run: () => ai.onRun(a) })),
   ];
-  return (
-    // A flex box, so the button in it can give way as the row's own buttons do.
-    <div style={{ position: 'relative', display: 'flex', minWidth: TOUCH_MIN }}>
+  const more = (
+    <div style={{ position: 'relative', display: 'flex', minWidth: TOUCH_MIN, flexShrink: itemCount ? 0 : undefined }}>
       <ActionBtn btnRef={triggerRef} onClick={() => setOpen(v => !v)} label={t('message.more')} touch popup expanded={open}>
         <MoreIcon />
       </ActionBtn>
@@ -396,6 +407,19 @@ export function MessageTools({ isMobile, items, ai = null }) {
       )}
     </div>
   );
+  return itemCount ? (
+    <div className="md-mobile-message-tools">
+      <div className="md-mobile-message-shortcuts" ref={toolbarSpace}>
+        {mobileToolbarItems.slice(0, toolbarCount).map(item => (
+          <ActionBtn key={item.key} label={item.label} title={item.title} onClick={item.onClick}
+            touch danger={item.danger} pressed={item.checked}>
+            {item.icon}
+          </ActionBtn>
+        ))}
+      </div>
+      {more}
+    </div>
+  ) : more;
 }
 
 const noticeStyle = accent => ({

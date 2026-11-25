@@ -1277,13 +1277,13 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
   // so there it is in More.
   const aiReplyShown = aiReplyAvailable(aiStatus, plaintextEmail);
   const handleAiReply = () => handleReply(defaultReplyAll, { aiReply: true });
+  const mobileToolbarItems = isMobile && message ? [
+    { key: 'forward', label: t('message.forward'), icon: <ForwardIcon />, onClick: handleForward },
+    { key: 'move', label: t('contextMenu.moveToFolder'), icon: <MoveIcon />, onClick: handleOpenMovePicker },
+    { key: 'star', label: t('message.star'), icon: <StarIcon filled={message.is_starred} />, checked: Boolean(message.is_starred), onClick: handleStarToggle },
+    { key: 'delete', label: t('message.delete'), icon: <TrashIcon />, danger: true, onClick: handleDelete },
+  ] : [];
   const toolItems = message ? [
-    ...(isMobile ? [
-      { key: 'forward', label: t('message.forward'), icon: <ForwardIcon />, onClick: handleForward },
-      { key: 'move', label: t('contextMenu.moveToFolder'), icon: <MoveIcon />, onClick: handleOpenMovePicker },
-      { key: 'star', label: t('message.star'), icon: <StarIcon filled={message.is_starred} />, checked: Boolean(message.is_starred), onClick: handleStarToggle },
-      { key: 'delete', label: t('message.delete'), icon: <TrashIcon />, danger: true, onClick: handleDelete },
-    ] : []),
     aiReplyShown && isMobile && { key: 'aiReply', label: t('compose.toolbar.aiReply'), icon: <AiReplyIcon />, onClick: handleAiReply },
     hasSpamFolder && !inSpamFolder && { key: 'spam', label: t('contextMenu.markAsSpam'), icon: <SpamIcon />, onClick: () => performSingleSpamLabel('spam') },
     inSpamFolder && { key: 'ham', label: t('contextMenu.markAsHam'), icon: <HamIcon />, onClick: () => performSingleSpamLabel('ham') },
@@ -1486,10 +1486,11 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
           </>)}
         </div>}
 
-        <div style={{ flex: 1 }} />
+        {!isMobile && <div style={{ flex: 1 }} />}
 
         {/* Keyed by message, so a menu left open does not carry over to the next one. */}
-        <MessageTools key={`tools-${message.id}-${menuEpoch}`} isMobile={isMobile} items={toolItems} ai={aiTools} />
+        <MessageTools key={`tools-${message.id}-${menuEpoch}`} isMobile={isMobile}
+          items={toolItems} ai={aiTools} mobileToolbarItems={mobileToolbarItems} />
 
         {!isMobile && <>
           <ActionBtn onClick={handleStarToggle} label={t('message.star')} pressed={Boolean(message.is_starred)}>

@@ -1552,6 +1552,41 @@ describe('reply options popup', () => {
 });
 
 
+test('mobile message actions move between the toolbar and More as the available width changes', async () => {
+  const originalObserver = dom.window.ResizeObserver;
+  let resize;
+  dom.window.ResizeObserver = class {
+    constructor(callback) { resize = width => callback([{ contentRect: { width } }]); }
+    observe() {}
+    disconnect() {}
+  };
+  const mobileToolbarItems = ['forward', 'move', 'star', 'delete'].map(key => ({ key, label: key, onClick() {} }));
+  const more = () => document.querySelector('button[aria-label="message.more"]');
+  const click = async button => React.act(async () => button.click());
+  const check = async (width, expectedToolbar) => {
+    await React.act(async () => resize(width));
+    const buttons = [...document.querySelectorAll('#root button')].filter(button => button !== more());
+    assert.deepEqual(buttons.map(button => button.getAttribute('aria-label')), expectedToolbar);
+    await click(more());
+    assert.deepEqual([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent),
+      ['read', ...mobileToolbarItems.slice(expectedToolbar.length).map(item => item.key)]);
+    await click(more());
+  };
+  try {
+    await React.act(async () => root.render(React.createElement(MessageTools, {
+      isMobile: true, items: [{ key: 'read', label: 'read', onClick() {} }], mobileToolbarItems,
+    })));
+    assert.equal(typeof resize, 'function', 'observes available toolbar space');
+    await check(192, ['forward', 'move', 'star', 'delete']);
+    await check(95.5, ['forward']);
+    await check(47.5, []);
+    await check(144, ['forward', 'move', 'star']);
+  } finally {
+    await React.act(async () => root.render(null));
+    dom.window.ResizeObserver = originalObserver;
+  }
+});
+
 test('AI menu highlights the whole trigger only while open, without becoming a toggle button', async () => {
   const runs = [];
   await React.act(async () => root.render(React.createElement(MessageTools, {
