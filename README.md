@@ -14,27 +14,22 @@ The screenshots use sample mailboxes. Select an image to open it at full size.
   <a href="media/mailflow-m3-desktop.png"><img src="media/mailflow-m3-desktop.png" width="820" alt="MailFlow M3 desktop inbox with a sample message open in the reading pane"></a>
 </p>
 
-### Appearance sync and message composition
-
-<p align="center">
-  <a href="media/mailflow-m3-appearance.png"><img src="media/mailflow-m3-appearance.png" width="422" alt="Appearance sync settings with separate desktop and mobile profiles selected"></a>
-  <a href="media/mailflow-m3-compose.png"><img src="media/mailflow-m3-compose.png" width="393" alt="Message composition window with a sample recipient, formatted body controls, and Send button"></a>
-</p>
-
-### Mobile inbox and push priority
-
-<p align="center">
-  <a href="media/mailflow-m3-mobile.png"><img src="media/mailflow-m3-mobile.png" width="205" alt="MailFlow M3 mobile inbox with sample messages and a hamburger menu"></a>
-  <a href="media/mailflow-m3-push-priority.png"><img src="media/mailflow-m3-push-priority.png" width="450" alt="Push priority by category with Primary set to High and Newsletters set to Low"></a>
-</p>
-
-### Mobile message view and More menu
+### Mobile inbox and message actions
 
 Forward, Move, Star, and Delete fit in the toolbar at 416px and 100% scale. At 320px and 130% scale, they move into More.
 
 <p align="center">
-  <a href="media/mailflow-m3-mobile-reader.png"><img src="media/mailflow-m3-mobile-reader.png" width="312" alt="Mobile message view at 416 pixels showing Forward, Move, Star, and Delete in the toolbar"></a>
-  <a href="media/mailflow-m3-mobile-reader-more.png"><img src="media/mailflow-m3-mobile-reader-more.png" width="240" alt="Mobile message view at 320 pixels and 130 percent scale with the scrollable More menu open"></a>
+  <a href="media/mailflow-m3-mobile.png"><img src="media/mailflow-m3-mobile.png" width="270" alt="MailFlow M3 mobile inbox with sample messages and a hamburger menu"></a>
+  <a href="media/mailflow-m3-mobile-reader.png"><img src="media/mailflow-m3-mobile-reader.png" width="304" alt="Mobile message view at 416 pixels showing Forward, Move, Star, and Delete in the toolbar"></a>
+  <a href="media/mailflow-m3-mobile-reader-more.png"><img src="media/mailflow-m3-mobile-reader-more.png" width="234" alt="Mobile message view at 320 pixels and 130 percent scale with the scrollable More menu open"></a>
+</p>
+
+### Appearance, composition, and notifications
+
+<p align="center">
+  <a href="media/mailflow-m3-appearance.png"><img src="media/mailflow-m3-appearance.png" width="274" alt="Appearance sync settings with separate desktop and mobile profiles selected"></a>
+  <a href="media/mailflow-m3-compose.png"><img src="media/mailflow-m3-compose.png" width="255" alt="Message composition window with a sample recipient, formatted body controls, and Send button"></a>
+  <a href="media/mailflow-m3-push-priority.png"><img src="media/mailflow-m3-push-priority.png" width="274" alt="Push priority by category with Primary set to High and Newsletters set to Low"></a>
 </p>
 
 ## What MailFlow M3 adds
