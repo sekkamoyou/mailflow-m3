@@ -28,6 +28,15 @@ The screenshots use sample mailboxes. Select an image to open it at full size.
   <a href="media/mailflow-m3-push-priority.png"><img src="media/mailflow-m3-push-priority.png" width="450" alt="Push priority by category with Primary set to High and Newsletters set to Low"></a>
 </p>
 
+### Mobile message view and More menu
+
+Forward, Move, Star, and Delete fit in the toolbar at 416px and 100% scale. At 320px and 130% scale, they move into More.
+
+<p align="center">
+  <a href="media/mailflow-m3-mobile-reader.png"><img src="media/mailflow-m3-mobile-reader.png" width="312" alt="Mobile message view at 416 pixels showing Forward, Move, Star, and Delete in the toolbar"></a>
+  <a href="media/mailflow-m3-mobile-reader-more.png"><img src="media/mailflow-m3-mobile-reader-more.png" width="240" alt="Mobile message view at 320 pixels and 130 percent scale with the scrollable More menu open"></a>
+</p>
+
 ## What MailFlow M3 adds
 
 - **Web interface** — Material 3 navigation, controls, and dialogs for desktop and mobile, with refined Korean UI text.
