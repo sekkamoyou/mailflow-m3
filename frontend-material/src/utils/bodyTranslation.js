@@ -28,7 +28,7 @@ function readTranslations(reply, sources) {
   });
 }
 
-export async function translateBodyText({ html, text }, target, chat) {
+export function prepareBodyTranslation({ html, text }) {
   const segments = [];
   const separateText = value => value.split(TEXT_BREAKS).flatMap((part, index) => {
     if (index % 2 || !/\p{L}/u.test(part)) return part;
@@ -44,13 +44,11 @@ export async function translateBodyText({ html, text }, target, chat) {
       if (!/\p{L}/u.test(piece)) return piece;
       const source = piece.trim();
       const start = piece.indexOf(source);
-      const item = { source, leading: piece.slice(0, start), trailing: piece.slice(start + source.length) };
-      segments.push(item);
+      const item = { index: segments.length, leading: piece.slice(0, start), trailing: piece.slice(start + source.length) };
+      segments.push(source);
       return item;
     });
   });
-  const render = parts => parts.map(part => typeof part === 'string'
-    ? part : part.leading + part.translation + part.trailing).join('');
 
   let template;
   let plainParts;
@@ -66,8 +64,26 @@ export async function translateBodyText({ html, text }, target, chat) {
   } else {
     plainParts = separateText(text);
   }
-  if (!segments.length) throw new Error('Nothing to translate');
+  return {
+    segments,
+    async fingerprint() {
+      const source = new TextEncoder().encode(JSON.stringify([1, Boolean(html), segments]));
+      const digest = await crypto.subtle.digest('SHA-256', source);
+      return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+    },
+    render(translated) {
+      if (segments.length !== translated.length) throw new Error('Incomplete body translation');
+      const renderParts = parts => parts.map(part => typeof part === 'string'
+        ? part : part.leading + translated[part.index] + part.trailing).join('');
+      if (!template) return renderParts(plainParts);
+      for (const [node, parts] of nodes) node.data = renderParts(parts);
+      return template.innerHTML;
+    },
+  };
+}
 
+export async function translateBodySegments(segments, target, chat) {
+  const result = [];
   const prompt = [
     `Translate this email into ${target}. The email is an ordered JSON array of text segments.`,
     'Return only a JSON array of strings with exactly one target-language string per input, in the same order.',
@@ -78,18 +94,15 @@ export async function translateBodyText({ html, text }, target, chat) {
     const sources = [];
     let size = 2;
     for (let i = start; i < segments.length; i++) {
-      const source = segments[i].source;
+      const source = segments[i];
       size += JSON.stringify(source).length + 1;
       if (size > MAX_BATCH_CHARS) break;
       sources.push(source);
     }
     const { messages } = buildAiActionMessages(prompt, JSON.stringify(sources));
-    const translated = readTranslations(await chat(messages), sources);
-    translated.forEach((translation, index) => { segments[start + index].translation = translation; });
+    result.push(...readTranslations(await chat(messages), sources));
     start += sources.length;
   }
 
-  if (!template) return render(plainParts);
-  for (const [node, parts] of nodes) node.data = render(parts);
-  return template.innerHTML;
+  return result;
 }

@@ -693,6 +693,8 @@ describe('message body rendering', () => {
     },
   };
   let originalFetch;
+  const translationRows = new Map();
+  const originalTranslationsApi = api.bodyTranslations;
 
   before(() => {
     globalThis.requestAnimationFrame ??= cb => setTimeout(() => cb(Date.now()), 0);
@@ -705,8 +707,26 @@ describe('message body rendering', () => {
       return { ok: true, status: 200, json: async () => (BODIES[id] ?? {}), text: async () => '' };
     };
     useStore.getState().setMessages?.([MSG_A, MSG_B, MSG_HTML, MSG_TEXT, MSG_MIXED]);
+    const key = (id, language, source) => JSON.stringify([id, language, source]);
+    api.bodyTranslations = {
+      get: async (...scope) => ({ translation: translationRows.get(key(...scope)) ?? null }),
+      save: async (id, language, source, segments) => {
+        const translation = { segments, translated: true };
+        translationRows.set(key(id, language, source), translation);
+        return { translation };
+      },
+      setView: async (id, language, source, translated) => {
+        const rowKey = key(id, language, source);
+        const translation = { ...translationRows.get(rowKey), translated };
+        translationRows.set(rowKey, translation);
+        return { translation };
+      },
+    };
   });
-  after(() => { globalThis.fetch = originalFetch; });
+  after(() => {
+    globalThis.fetch = originalFetch;
+    api.bodyTranslations = originalTranslationsApi;
+  });
 
   const open = async (id) => {
     await React.act(async () => {
@@ -739,6 +759,7 @@ describe('message body rendering', () => {
   });
 
   beforeEach(async () => {
+    translationRows.clear();
     await React.act(async () => useStore.setState({ bodyTranslations: new Map() }));
   });
 
@@ -830,7 +851,7 @@ describe('message body rendering', () => {
     }
   });
 
-  test('keeps each message’s last translation view across other translations and remounts', async () => {
+  test('restores each saved translation and last choice in a fresh reader without AI', async () => {
     const { status, chat } = api.ai;
     let calls = 0;
     api.ai.status = async () => ({ enabled: true, features: { summarize: true } });
@@ -858,17 +879,54 @@ describe('message body rendering', () => {
 
       await open('t1');
       assert.equal(button().textContent, 'message.showOriginalBody');
-      await React.act(async () => root.render(null));
+      await React.act(async () => {
+        root.render(null);
+        useStore.setState({ bodyTranslations: new Map() });
+      });
       api.ai.status = async () => ({ enabled: false, features: { summarize: false } });
       await open('h1');
       assert.equal(htmlText(), 'Hello from HTML');
       assert.match(document.querySelector('.material-body-translation-controls').textContent, /message.translationUnavailable/);
+      assert.equal(button().textContent, 'message.showTranslatedBody');
       await React.act(async () => button().click());
       assert.equal(htmlText(), 'Saved first translation');
       assert.equal(calls, 2);
     } finally {
       await React.act(async () => root.render(null));
       Object.assign(api.ai, { status, chat });
+    }
+  });
+
+  test('retries a failed save without AI and replaces the result only on an explicit retranslation', async () => {
+    const { status, chat } = api.ai;
+    const { save } = api.bodyTranslations;
+    let calls = 0;
+    api.ai.status = async () => ({ enabled: true, features: { summarize: true } });
+    api.ai.chat = async () => JSON.stringify([`Translation ${++calls}`]);
+    api.bodyTranslations.save = async () => { throw new Error('temporary storage error'); };
+    const controls = () => document.querySelector('.material-body-translation-controls');
+    const button = label => [...controls().querySelectorAll('button')].find(el => el.textContent === label);
+    const htmlText = () => parseFrame(document.querySelector('iframe')).querySelector('#hello').textContent;
+    try {
+      await React.act(async () => root.render(null));
+      await open('h1');
+      await React.act(async () => button('message.translateBody').click());
+      assert.equal(htmlText(), 'Hello from HTML');
+      assert.match(controls().querySelector('[role="alert"]').textContent, /message.translationSyncFailed/);
+      assert.equal(calls, 1);
+
+      api.bodyTranslations.save = save;
+      await React.act(async () => button('common.retry').click());
+      assert.equal(htmlText(), 'Translation 1');
+      assert.equal(calls, 1);
+      await React.act(async () => button('message.retranslateBody').click());
+      assert.equal(htmlText(), 'Translation 2');
+      assert.equal(calls, 2);
+      assert.equal([...translationRows.values()][0].segments[0], 'Translation 2');
+    } finally {
+      await React.act(async () => root.render(null));
+      Object.assign(api.ai, { status, chat });
+      api.bodyTranslations.save = save;
     }
   });
 

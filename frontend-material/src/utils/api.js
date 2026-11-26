@@ -187,7 +187,16 @@ async function endPushSubscription() {
   return sub?.endpoint ?? null;
 }
 
+const translationPath = (id, language, source) =>
+  `/mail/messages/${encodeURIComponent(id)}/translation?${new URLSearchParams({ language, source })}`;
+
 export const api = {
+  bodyTranslations: {
+    get: (id, language, source) => request('GET', translationPath(id, language, source)),
+    save: (id, language, source, segments) => request('PUT', translationPath(id, language, source), { segments }),
+    setView: (id, language, source, translated) =>
+      request('PATCH', translationPath(id, language, source), { translated }, undefined, true),
+  },
   webhooks: {
     get: () => request('GET', '/webhooks'),
     save: data => request('PUT', '/webhooks', data),

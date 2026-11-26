@@ -30,9 +30,11 @@ import { safeFilename, attachmentDisposition, truncateFilename } from '../utils/
 import { tokenize, extractFlagFeatures } from '../services/spamTokenizer.js';
 import { updateIncrementalForUser } from '../services/spamModelStore.js';
 import { findOwnedAccount, findOwnedMessage, findOwnedMessages, SIBLING_COUNT } from '../services/ownership.js';
+import messageTranslationRoutes from './messageTranslation.js';
 
 const router = Router();
 router.use(requireAuth);
+router.use('/messages/:id/translation', messageTranslationRoutes);
 
 // Whether an account-scoped plugin that maintains label sibling rows (currently GTD) is active for
 // this account — the modern replacement for the former email_accounts.gtd_enabled gate on the

@@ -540,7 +540,23 @@ describe('conversation actions', () => {
 
   test('a conversation card translates its own body in place and restores the same frame', async t => {
     const { user, bodyTranslations } = useStore.getState();
-    t.after(() => React.act(async () => useStore.setState({ user, bodyTranslations })));
+    const originalTranslationsApi = api.bodyTranslations;
+    let translation = null;
+    api.bodyTranslations = {
+      get: async () => ({ translation }),
+      save: async (_id, _language, _source, segments) => {
+        translation = { segments, translated: true };
+        return { translation };
+      },
+      setView: async (_id, _language, _source, translated) => {
+        translation = { ...translation, translated };
+        return { translation };
+      },
+    };
+    t.after(() => {
+      api.bodyTranslations = originalTranslationsApi;
+      return React.act(async () => useStore.setState({ user, bodyTranslations }));
+    });
     await React.act(async () => {
       useStore.setState({ user: { id: 'translation-fixture-user' }, bodyTranslations: new Map() });
       root.render(React.createElement(ConversationPane, { key: 'translation', threadId: '<1@x>', folder: 'INBOX', selectedMessageId: 'm1' }));
