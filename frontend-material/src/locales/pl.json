@@ -350,6 +350,7 @@
     "showOriginalBody": "Pokaż oryginał",
     "translatingBody": "Tłumaczenie…",
     "translationFailed": "Nie udało się przetłumaczyć tej wiadomości.",
+    "translationUnavailable": "Aby poprosić o nowe tłumaczenie, sprawdź połączenie z AI i uprawnienia dostępu.",
     "aiTruncated": "Na podstawie pierwszych {{percent}}% tej wiadomości. Reszta była zbyt długa, by wysłać ją do AI.",
     "aiExpand": "Rozwiń",
     "aiCollapse": "Zwiń",

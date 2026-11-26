@@ -538,8 +538,11 @@ describe('conversation actions', () => {
     for (const b of toolbar.querySelectorAll('button')) assert.equal(b.textContent.trim(), '', `${b.getAttribute('aria-label')} is an icon`);
   });
 
-  test('a conversation card translates its own body in place and restores the same frame', async () => {
+  test('a conversation card translates its own body in place and restores the same frame', async t => {
+    const { user, bodyTranslations } = useStore.getState();
+    t.after(() => React.act(async () => useStore.setState({ user, bodyTranslations })));
     await React.act(async () => {
+      useStore.setState({ user: { id: 'translation-fixture-user' }, bodyTranslations: new Map() });
       root.render(React.createElement(ConversationPane, { key: 'translation', threadId: '<1@x>', folder: 'INBOX', selectedMessageId: 'm1' }));
     });
     await React.act(async () => { await new Promise(r => setTimeout(r, 50)); });

@@ -89,7 +89,6 @@ export default function ConversationPane({ threadId, folder, unified = false, ac
   useEffect(() => {
     api.ai.status().then(setAiStatus).catch(() => {});
   }, []);
-  const aiEnabled = Boolean(aiStatus?.enabled && aiStatus?.features?.summarize);
   const aiReplyEnabled = aiReplyAvailable(aiStatus, plaintextEmail);
 
   // Read when the conversation arrives, without making the pick a reason to fetch it again.
@@ -448,7 +447,7 @@ export default function ConversationPane({ threadId, folder, unified = false, ac
             selected={message.id === focusedId}
             onToggle={toggle}
             onUpdate={updateConversationMessage}
-            aiEnabled={aiEnabled}
+            aiStatus={aiStatus}
             aiReplyEnabled={aiReplyEnabled}
           />
         ))}

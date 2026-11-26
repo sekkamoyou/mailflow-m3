@@ -348,6 +348,7 @@
     "showOriginalBody": "Original anzeigen",
     "translatingBody": "Wird übersetzt…",
     "translationFailed": "Diese Nachricht konnte nicht übersetzt werden.",
+    "translationUnavailable": "Prüfe für eine neue Übersetzung die KI-Verbindung und die Zugriffsrechte.",
     "aiTruncated": "Basiert auf den ersten {{percent}} % dieser E-Mail. Der Rest war zu lang für die KI.",
     "aiExpand": "Erweitern",
     "aiCollapse": "Einklappen",

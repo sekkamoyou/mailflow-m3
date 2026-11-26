@@ -157,6 +157,7 @@ export const useStore = create((set, get) => ({
         unreadCounts: { total: 0, byAccount: {}, snapshots: {}, complete: false },
         snoozedCount: 0,
         ...SCHEDULED_RESET,
+        bodyTranslations: new Map(),
         timeFormat: 'auto', sessionDays: 0, sessionDaysDefault: 7,
         senderFaviconsLoaded: false,
         senderFavicons: false,
@@ -1246,6 +1247,9 @@ export const useStore = create((set, get) => ({
     set({ shortcuts: overrides });
     return api.savePreferences({ shortcuts: overrides }).catch(() => {});
   },
+
+  // Completed body translations and view choices for the signed-in user in this tab.
+  bodyTranslations: new Map(),
 
   // User-defined AI actions (#202), synced across devices. Each: { id, label, prompt }.
   // null = not yet loaded; loadPreferences seeds defaults on first run.

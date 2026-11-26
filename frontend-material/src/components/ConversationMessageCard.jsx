@@ -40,7 +40,7 @@ import {
 // Design from #317 by YunQue0912.
 // `onUpdate(id, patch)` applies a flag change to the conversation's own copy of the message and to
 // the list's, since the pane holds the thread apart from the list.
-export default function ConversationMessageCard({ message, expanded, onToggle, onUpdate, aiEnabled = false, aiReplyEnabled = false, selected = false, preview = false }) {
+export default function ConversationMessageCard({ message, expanded, onToggle, onUpdate, aiStatus = null, aiReplyEnabled = false, selected = false, preview = false }) {
   const { t } = useTranslation();
   const accounts = useStore(s => s.accounts);
   const openCompose = useStore(s => s.openCompose);
@@ -72,8 +72,9 @@ export default function ConversationMessageCard({ message, expanded, onToggle, o
   const darkRefused = Boolean(body?.html) && bodyDark && darkResult?.requested === true && darkResult.outcome === 'light';
   const shownDark = bodyDark && !darkRefused;
   const [loading, setLoading] = useState(false);
+  const aiEnabled = Boolean(aiStatus?.enabled && aiStatus?.features?.summarize);
   const { displayBody, controls: translationControls } = useMessageBodyTranslation({
-    enabled: aiEnabled && expanded && !loading && !error, messageId: message.id, body,
+    active: expanded && !preview && !loading && !error, aiStatus, messageId: message.id, body,
   });
   const iframeRef = useRef(null);
   const emailScaleRef = useRef(1);

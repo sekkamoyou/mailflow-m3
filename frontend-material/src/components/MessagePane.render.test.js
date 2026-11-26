@@ -9,7 +9,7 @@
 // already present via the build toolchain. react-i18next is stubbed because the component only
 // needs t() to return something; wiring a real i18n instance would test i18next, not this.
 
-import { test, describe, before, after } from 'node:test';
+import { test, describe, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';
@@ -738,6 +738,10 @@ describe('message body rendering', () => {
     }
   });
 
+  beforeEach(async () => {
+    await React.act(async () => useStore.setState({ bodyTranslations: new Map() }));
+  });
+
   const parseFrame = frame => new DOMParser().parseFromString(frame.getAttribute('srcdoc'), 'text/html');
 
   test('translation keeps the HTML reader and toggles back without another AI request', async () => {
@@ -820,6 +824,67 @@ describe('message body rendering', () => {
 
       await React.act(async () => button.click());
       assert.equal(parseFrame(frame).querySelector('.reservation strong').textContent, 'ご予約ありがとうございます！');
+    } finally {
+      await React.act(async () => root.render(null));
+      Object.assign(api.ai, { status, chat });
+    }
+  });
+
+  test('keeps each message’s last translation view across other translations and remounts', async () => {
+    const { status, chat } = api.ai;
+    let calls = 0;
+    api.ai.status = async () => ({ enabled: true, features: { summarize: true } });
+    api.ai.chat = async messages => {
+      calls++;
+      return messages[1].content.includes('Hello from HTML')
+        ? '["Saved first translation"]' : '["Saved second", "translation"]';
+    };
+    const button = () => document.querySelector('.material-body-translation-controls button');
+    const htmlText = () => parseFrame(document.querySelector('iframe')).querySelector('#hello').textContent;
+    try {
+      await React.act(async () => root.render(null));
+      await open('h1');
+      await React.act(async () => button().click());
+      assert.equal(htmlText(), 'Saved first translation');
+
+      await open('t1');
+      await React.act(async () => button().click());
+      assert.match(document.querySelector('.material-message-body .msg-card').textContent, /Saved second/);
+
+      await open('h1');
+      assert.equal(htmlText(), 'Saved first translation');
+      assert.equal(button().textContent, 'message.showOriginalBody');
+      await React.act(async () => button().click());
+
+      await open('t1');
+      assert.equal(button().textContent, 'message.showOriginalBody');
+      await React.act(async () => root.render(null));
+      api.ai.status = async () => ({ enabled: false, features: { summarize: false } });
+      await open('h1');
+      assert.equal(htmlText(), 'Hello from HTML');
+      assert.match(document.querySelector('.material-body-translation-controls').textContent, /message.translationUnavailable/);
+      await React.act(async () => button().click());
+      assert.equal(htmlText(), 'Saved first translation');
+      assert.equal(calls, 2);
+    } finally {
+      await React.act(async () => root.render(null));
+      Object.assign(api.ai, { status, chat });
+    }
+  });
+
+  test('shows an AI setup notice instead of starting a new translation when AI is unavailable', async () => {
+    const { status, chat } = api.ai;
+    let calls = 0;
+    api.ai.status = async () => ({ enabled: false, features: { summarize: false } });
+    api.ai.chat = async () => { calls++; return '[]'; };
+    try {
+      await React.act(async () => root.render(null));
+      await open('h1');
+      const controls = document.querySelector('.material-body-translation-controls');
+      assert.equal(controls.textContent, 'message.translationUnavailable');
+      assert.equal(controls.querySelector('button'), null);
+      assert.equal(parseFrame(document.querySelector('iframe')).querySelector('#hello').textContent, 'Hello from HTML');
+      assert.equal(calls, 0);
     } finally {
       await React.act(async () => root.render(null));
       Object.assign(api.ai, { status, chat });

@@ -232,7 +232,7 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
   const [aiStatus, setAiStatus] = useState(null);
   const aiSummariesEnabled = aiStatus?.enabled && aiStatus?.features?.summarize;
   const { displayBody, controls: translationControls } = useMessageBodyTranslation({
-    enabled: aiSummariesEnabled && !loadingBody && !bodyError, messageId: selectedMessageId, body,
+    active: !loadingBody && !bodyError, aiStatus, messageId: selectedMessageId, body,
   });
   // Per-action results for the current message: { [actionKey]: { status, text, label } }.
   // status: 'loading' | 'done' | 'error'. Restored from localStorage on message change.

@@ -348,6 +348,7 @@
     "showOriginalBody": "查看原文",
     "translatingBody": "正在翻译…",
     "translationFailed": "无法翻译此邮件。",
+    "translationUnavailable": "要请求新的翻译，请检查 AI 连接和访问权限。",
     "aiTruncated": "仅基于此邮件的前 {{percent}}%。其余内容过长，未发送给 AI。",
     "aiExpand": "展开",
     "aiCollapse": "收起",

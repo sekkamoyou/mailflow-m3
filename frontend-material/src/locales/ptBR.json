@@ -348,6 +348,7 @@
     "showOriginalBody": "Mostrar original",
     "translatingBody": "Traduzindo…",
     "translationFailed": "Não foi possível traduzir esta mensagem.",
+    "translationUnavailable": "Verifique a conexão e as permissões de IA para solicitar uma nova tradução.",
     "aiTruncated": "Baseado nos primeiros {{percent}}% deste e-mail. O restante era longo demais para enviar à IA.",
     "aiExpand": "Expandir",
     "aiCollapse": "Recolher",

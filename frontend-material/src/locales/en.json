@@ -348,6 +348,7 @@
     "showOriginalBody": "Show original",
     "translatingBody": "Translating…",
     "translationFailed": "Could not translate this message.",
+    "translationUnavailable": "Check your AI connection and access to request a new translation.",
     "aiTruncated": "Based on the first {{percent}}% of this email. The rest was too long to send to the AI.",
     "aiExpand": "Expand",
     "aiCollapse": "Collapse",
