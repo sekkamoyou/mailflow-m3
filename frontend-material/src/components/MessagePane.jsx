@@ -1,6 +1,7 @@
 import { spamFolderPaths as spamFolderPathsFor } from '../utils/spamFolders.js';
 import { descaleCss } from '../utils/uiScaleCss.js';
 import MessageBodyCard, { MessageTextBody } from './MessageBodyCard.jsx';
+import MessageBodyTranslation from './MessageBodyTranslation.jsx';
 import MessageSenderCard from './MessageSenderCard.jsx';
 import { useMessageMetadata } from '../hooks/useMessageMetadata.js';
 import MaterialDialog from '../material/MaterialDialog.jsx';
@@ -749,6 +750,8 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
   }, []);
 
   const getFindRoot = useCallback(() => {
+    const translated = scrollContainerRef.current?.querySelector('.material-translated-body');
+    if (translated) return { doc: document, root: translated, iframe: null };
     if (!USE_DIV_RENDER && body?.html && iframeRef.current?.contentDocument?.body) {
       return {
         doc: iframeRef.current.contentDocument,
@@ -1620,8 +1623,7 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
         )}
       </div>
 
-      {/* HTML email — iframe sized to full content height; outer container scrolls */}
-      {!loadingBody && !bodyError && body?.html && (
+      {!loadingBody && !bodyError && (body?.html || body?.text) && (
         <div className="material-message-body" style={{ padding: isMobile ? '0 0 16px' : '0 28px 24px' }}>
           {/* Unsubscribe banner — shown for newsletter messages that have a List-Unsubscribe header */}
           {message.list_unsubscribe && !message.unsubscribed_at && unsubscribeStatus !== 'done' && (
@@ -1657,7 +1659,7 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
             </div>
           )}
 
-          {body.hasBlockedRemoteImages && (
+          {body.html && body.hasBlockedRemoteImages && (
             <RemoteImagesNotice
               fromEmail={message.from_email}
               onLoad={handleLoadImages}
@@ -1666,80 +1668,56 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
               saving={savingAllow}
             />
           )}
-          <MessageBodyCard isMobile={isMobile} shownDark={shownDark} surface={frameResult?.surface}>
-            {USE_DIV_RENDER ? (
-              // Three-layer structure keeps concerns separate:
-              // Outer  — click interception, height/overflow for scale-to-fit,
-              //          position:relative + parent contain:layout contain hostile CSS.
-              // Scale  — receives the CSS transform for scale-to-fit; carries no
-              //          email CSS class so transform:none!important on .email-*
-              //          never cancels the scale.
-              // Inner  — scoped email CSS root (.email-* class + data attribute);
-              //          transform:none!important here neutralises hostile body CSS
-              //          without touching the scale wrapper above it.
-              <div
-                ref={outerRef}
-                style={{ position: 'relative', width: '100%' }}
-                onClick={handleEmailClick}
-                onContextMenu={handlePaneContextMenu}
-              >
-                <div ref={scaleRef}>
+          <MessageBodyTranslation enabled={aiSummariesEnabled} messageId={selectedMessageId}
+            body={body} isMobile={isMobile} dark={isDarkTheme(theme)}>
+            {body.html ? (
+              <MessageBodyCard isMobile={isMobile} shownDark={shownDark} surface={frameResult?.surface}>
+                {USE_DIV_RENDER ? (
+                  // Three-layer structure keeps concerns separate:
+                  // Outer  — click interception, height/overflow for scale-to-fit,
+                  //          position:relative + parent contain:layout contain hostile CSS.
+                  // Scale  — receives the CSS transform for scale-to-fit; carries no
+                  //          email CSS class so transform:none!important on .email-*
+                  //          never cancels the scale.
+                  // Inner  — scoped email CSS root (.email-* class + data attribute);
+                  //          transform:none!important here neutralises hostile body CSS
+                  //          without touching the scale wrapper above it.
                   <div
-                    ref={innerRef}
-                    data-mailflow-email={prepared?.prefix}
-                    className={prepared?.prefix ?? ''}
-                    translate="yes"
-                    dangerouslySetInnerHTML={prepared ? { __html: prepared.html } : undefined}
+                    ref={outerRef}
+                    style={{ position: 'relative', width: '100%' }}
+                    onClick={handleEmailClick}
+                    onContextMenu={handlePaneContextMenu}
+                  >
+                    <div ref={scaleRef}>
+                      <div
+                        ref={innerRef}
+                        data-mailflow-email={prepared?.prefix}
+                        className={prepared?.prefix ?? ''}
+                        translate="yes"
+                        dangerouslySetInnerHTML={prepared ? { __html: prepared.html } : undefined}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <MessageBodyView
+                    iframeRef={iframeRef}
+                    body={body}
+                    dark={bodyDark}
+                    onDarkResult={result => setDarkResult({ id: selectedMessageId, ...result })}
+                    messageId={selectedMessageId}
+                    emailScaleRef={emailScaleRef}
+                    hasNativeContextTarget={hasNativeContextTarget}
+                    onContextMenu={openPaneContextMenu}
                   />
-                </div>
-              </div>
+                )}
+              </MessageBodyCard>
             ) : (
-              <MessageBodyView
-                iframeRef={iframeRef}
-                body={body}
-                dark={bodyDark}
-                onDarkResult={result => setDarkResult({ id: selectedMessageId, ...result })}
-                messageId={selectedMessageId}
-                emailScaleRef={emailScaleRef}
-                hasNativeContextTarget={hasNativeContextTarget}
-                onContextMenu={openPaneContextMenu}
-              />
+              <MessageTextBody text={body.text} isMobile={isMobile} dark={bodyDark} />
             )}
-          </MessageBodyCard>
+          </MessageBodyTranslation>
         </div>
       )}
 
-      {/* Plain-text email — no internal scroll, outer container handles it */}
-      {!loadingBody && !bodyError && body?.text && !body?.html && (
-        <div className="material-message-body" style={{
-          padding: isMobile ? '0 0px 16px' : '0 28px 24px',
-        }}>
-          {message.list_unsubscribe && !message.unsubscribed_at && unsubscribeStatus !== 'done' && (
-            <UnsubscribeNotice status={unsubscribeStatus} onUnsubscribe={handleUnsubscribe} />
-          )}
-          {canAiClassify && (
-            <div className="msg-notice" style={{
-              marginBottom: 10, padding: '9px 14px',
-              background: 'var(--bg-secondary)', border: '1px solid var(--border)',
-              borderLeft: '3px solid var(--text-tertiary)', borderRadius: 'var(--md-sys-shape-corner-small)',
-              display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-              fontSize: 'var(--md-sys-typescale-body-small-size)', color: 'var(--text-secondary)',
-            }}>
-              <span style={{ flex: 1 }}>{t('message.aiClassify.info')}</span>
-              <MaterialButton variant="outlined" onClick={handleAiClassify} disabled={aiClassifying}
-                style={{
-                  background: 'none', border: '1px solid var(--border)', borderRadius: 'var(--md-sys-shape-corner-small)',
-                  padding: '3px 9px', cursor: aiClassifying ? 'default' : 'pointer',
-                  color: 'var(--text-primary)', fontSize: 'var(--md-sys-typescale-body-small-size)', fontWeight: 500,
-                  opacity: aiClassifying ? 0.5 : 1,
-                }}>
-                {aiClassifying ? t('common.loading') : t('message.aiClassify.button')}
-              </MaterialButton>
-            </div>
-          )}
-          <MessageTextBody text={body.text} isMobile={isMobile} dark={bodyDark} />
-        </div>
-      )}
       </div>{/* end single scroll container */}
       </SwipePager>
 

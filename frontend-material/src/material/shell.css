@@ -192,6 +192,9 @@ html[lang=ko] :is(.md-button, .nav-item, .admin-tab) { word-break: keep-all; }
 }
 .material-reader .msg-card { border: 0 !important; border-radius: 0 !important; box-shadow: none !important; background: transparent !important; }
 .material-reader-content { padding: 24px !important; }
+.material-body-translation-controls { display:flex; align-items:center; flex-wrap:wrap; gap:0 8px; margin:0 0 6px; font-size:var(--md-sys-typescale-body-small-size); color:var(--text-secondary); }
+.material-body-translation-controls [role=alert] { color:var(--md-sys-color-error); }
+.material-translated-body { white-space:pre-wrap; overflow-wrap:anywhere; font-size:var(--md-sys-typescale-body-medium-size); line-height:1.7; }
 /* Reserve the same gutter in the live reader and its inert swipe previews. */
 .material-message-scroll { scrollbar-gutter: stable; }
 .material-ai-result-actions > .md-button { margin: 0; }

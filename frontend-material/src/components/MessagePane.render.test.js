@@ -686,6 +686,8 @@ describe('message body rendering', () => {
   before(() => {
     globalThis.requestAnimationFrame ??= cb => setTimeout(() => cb(Date.now()), 0);
     dom.window.requestAnimationFrame ??= globalThis.requestAnimationFrame;
+    globalThis.cancelAnimationFrame ??= id => clearTimeout(id);
+    dom.window.cancelAnimationFrame ??= globalThis.cancelAnimationFrame;
     originalFetch = globalThis.fetch;
     globalThis.fetch = async (url) => {
       const id = /\/messages\/([^/]+)\/body/.exec(String(url))?.[1];
@@ -714,6 +716,7 @@ describe('message body rendering', () => {
           root.render(React.createElement(MessagePane, { key: String(summarize) }));
         });
         assert.equal(document.getElementById('root').textContent.includes('message.aiClassify.button'), summarize);
+        assert.equal(Boolean(document.querySelector('.material-body-translation-controls button')), summarize);
       }
     } finally {
       api.ai.status = status;
@@ -721,6 +724,82 @@ describe('message body rendering', () => {
         useStore.setState({ categorizationEnabled });
         root.render(React.createElement(MessagePane));
       });
+    }
+  });
+
+  test('translation replaces the visible HTML body and toggles back without another AI request', async () => {
+    const { status, chat } = api.ai;
+    const translation = 'Translated text with <strong>literal markup</strong>';
+    let resolveTranslation;
+    const requests = [];
+    const button = () => document.querySelector('.material-body-translation-controls button');
+    api.ai.status = async () => ({ enabled: true, features: { summarize: true } });
+    api.ai.chat = (messages, options) => {
+      requests.push({ messages, options });
+      return new Promise(resolve => { resolveTranslation = resolve; });
+    };
+    try {
+      await React.act(async () => root.render(null));
+      await open('h1');
+      const frame = document.querySelector('iframe');
+      assert.equal(button()?.textContent, 'message.translateBody');
+      assert.equal(requests.length, 0);
+      await React.act(async () => button().click());
+      assert.equal(button().disabled, true);
+      assert.equal(frame.closest('[hidden]'), null);
+      assert.equal(requests[0].options.purpose, 'summarize');
+      assert.match(requests[0].messages[0].content, /untrusted email text/);
+      assert.match(requests[0].messages[1].content, /Hello from HTML/);
+      assert.match(requests[0].messages[2].content, /Translate this email into English/);
+      await React.act(async () => resolveTranslation(translation));
+
+      const translated = document.querySelector('.material-translated-body');
+      assert.equal(translated?.textContent, translation);
+      assert.equal(translated.children.length, 0);
+      assert.equal(button().textContent, 'message.showOriginalBody');
+      assert.ok(frame.closest('[hidden]'));
+      assert.equal(document.querySelector('.material-ai-result'), null);
+      await React.act(async () => button().click());
+      assert.equal(document.querySelector('.material-translated-body'), null);
+      assert.equal(document.querySelector('iframe'), frame);
+      assert.equal(frame.closest('[hidden]'), null);
+      await React.act(async () => button().click());
+      assert.equal(requests.length, 1);
+    } finally {
+      await React.act(async () => root.render(null));
+      Object.assign(api.ai, { status, chat });
+    }
+  });
+
+  test('switching messages aborts a translation and a failed retry keeps the original text', async () => {
+    const { status, chat } = api.ai;
+    let signal;
+    let resolveTranslation;
+    api.ai.status = async () => ({ enabled: true, features: { summarize: true } });
+    api.ai.chat = (_messages, options) => {
+      signal = options.signal;
+      return new Promise(resolve => { resolveTranslation = resolve; });
+    };
+    const button = () => document.querySelector('.material-body-translation-controls button');
+    try {
+      await React.act(async () => root.render(null));
+      await open('h1');
+      await React.act(async () => button().click());
+      await open('t1');
+      assert.equal(signal.aborted, true);
+      await React.act(async () => resolveTranslation('Previous message'));
+      assert.equal(document.querySelector('.material-translated-body'), null);
+      assert.equal(button().textContent, 'message.translateBody');
+
+      api.ai.chat = async () => { throw new Error('translation failed'); };
+      await React.act(async () => button().click());
+      assert.equal(document.querySelector('.material-body-translation-controls [role="alert"]')?.textContent,
+        'message.translationFailed');
+      assert.match(document.querySelector('.material-message-body .msg-card')?.textContent, /Plain text with/);
+      assert.equal(document.querySelector('.material-translated-body'), null);
+    } finally {
+      await React.act(async () => root.render(null));
+      Object.assign(api.ai, { status, chat });
     }
   });
 

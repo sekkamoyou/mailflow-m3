@@ -491,6 +491,10 @@ describe('conversation actions', () => {
       }
       if (String(url).includes('/ai/status')) return { ok: true, status: 200, json: async () => ({ enabled: true, features: { summarize: true, compose: true } }) };
       if (String(url).includes('/ai/chat')) {
+        if (JSON.parse(opts.body).messages.at(-1).content.startsWith('Translate this email')) {
+          const sse = 'data: {"choices":[{"delta":{"content":"Translated sample."}}]}\n\ndata: [DONE]\n\n';
+          return new Response(sse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+        }
         const sse = 'data: {"choices":[{"delta":{"content":"Short "}}]}\n\ndata: {"choices":[{"delta":{"content":"summary."}}]}\n\ndata: [DONE]\n\n';
         return new Response(sse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
       }
@@ -531,6 +535,28 @@ describe('conversation actions', () => {
       'message.downloadEml', 'message.print', 'message.showDark', 'message.aiActions', 'message.star',
     ]);
     for (const b of toolbar.querySelectorAll('button')) assert.equal(b.textContent.trim(), '', `${b.getAttribute('aria-label')} is an icon`);
+  });
+
+  test('a conversation card translates its own body in place and restores the same frame', async () => {
+    await React.act(async () => {
+      root.render(React.createElement(ConversationPane, { key: 'translation', threadId: '<1@x>', folder: 'INBOX', selectedMessageId: 'm1' }));
+    });
+    await React.act(async () => { await new Promise(r => setTimeout(r, 50)); });
+    const message = card('m1');
+    const frame = message.querySelector('iframe');
+    const control = () => message.querySelector('.material-body-translation-controls button');
+    assert.ok(frame);
+    assert.equal(control()?.textContent, 'message.translateBody');
+    await click(control());
+    const request = requests.findLast(entry => entry.url.endsWith('/ai/chat'));
+    assert.match(JSON.parse(request.body).messages.at(-1).content, /Translate this email into English/);
+    assert.equal(message.querySelector('.material-translated-body')?.textContent, 'Translated sample.');
+    assert.ok(frame.closest('[hidden]'));
+    assert.equal(control()?.textContent, 'message.showOriginalBody');
+    await click(control());
+    assert.equal(message.querySelector('.material-translated-body'), null);
+    assert.ok(message.querySelector('iframe') === frame);
+    assert.equal(frame.closest('[hidden]'), null);
   });
 
   test('the reply menu opens in its portal and Escape restores the trigger', async () => {
@@ -826,7 +852,7 @@ describe('conversation pane on a phone', () => {
       };
       // So does a click outside it.
       await reopen();
-      const backdrop = document.querySelector('[role="menu"][aria-label="message.more"]').previousElementSibling;
+      const backdrop = document.querySelector('[role="menu"][aria-label="message.more"]').closest('.md-menu-viewport').previousElementSibling;
       await React.act(async () => { backdrop.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); });
       assert.equal(menuItems().length, 0);
       assert.ok((document.activeElement) === (more), "DOM identity: document.activeElement === more");
