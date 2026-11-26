@@ -13,7 +13,7 @@ import { buildPrintDocument, openPrintWindow, printInWindow } from '../utils/pri
 import { openReplyFromMessage, openForwardFromMessage } from '../utils/composeFromMessage.js';
 import { shortcutBus } from '../utils/shortcutBus.js';
 import MessageBodyView from './MessageBodyView.jsx';
-import MessageBodyTranslation from './MessageBodyTranslation.jsx';
+import { useMessageBodyTranslation } from './MessageBodyTranslation.jsx';
 import AttachmentStrip from './AttachmentStrip.jsx';
 import { isDarkTheme, canShowDark, showDark } from '../utils/darkScheme.js';
 import AiResultBox from './AiResultBox.jsx';
@@ -72,6 +72,9 @@ export default function ConversationMessageCard({ message, expanded, onToggle, o
   const darkRefused = Boolean(body?.html) && bodyDark && darkResult?.requested === true && darkResult.outcome === 'light';
   const shownDark = bodyDark && !darkRefused;
   const [loading, setLoading] = useState(false);
+  const { displayBody, controls: translationControls } = useMessageBodyTranslation({
+    enabled: aiEnabled && expanded && !loading && !error, messageId: message.id, body,
+  });
   const iframeRef = useRef(null);
   const emailScaleRef = useRef(1);
   const remoteRequestedRef = useRef(null);
@@ -417,50 +420,48 @@ export default function ConversationMessageCard({ message, expanded, onToggle, o
               saving={savingAllow}
             />
           )}
-          <MessageBodyTranslation enabled={aiEnabled && !loading && !error} messageId={message.id}
-            body={body} isMobile={isMobile} dark={isDarkTheme(theme)}>
-            {body?.html && (
-              // The same white padded card the reading pane wraps its body in. The frame's
-              // stylesheet zeroes body margin and padding, so the only gutter an email has
-              // is what the surrounding card provides: the reading pane gives every body
-              // 16px, while this card put the frame straight on the dark background and
-              // hand-typed mail (which brings no margins of its own) rendered flush against
-              // the frame edge. Now both views agree, and newsletters and fixed layouts are
-              // untouched — they keep whatever padding their own HTML carries, inside the
-              // same card the reading pane already gives them.
-              <div className="msg-card" style={{
-                padding: '14px 16px 12px',
-                // The frame's own background, so the card and the body read as one surface: the
-                // sender's dark background where their design sets one, otherwise the theme's.
-                background: shownDark ? (darkResult?.surface || 'var(--bg-primary)') : 'white',
-                borderRadius: 'var(--md-sys-shape-corner-extra-small)',
-                border: shownDark ? 'none' : '1px solid var(--border-subtle)',
-                overflow: 'hidden',
-              }}>
-                <MessageBodyView
-                  iframeRef={iframeRef}
-                  body={body}
-                  dark={bodyDark}
-                  onDarkResult={setDarkResult}
-                  messageId={message.id}
-                  emailScaleRef={emailScaleRef}
-                />
-              </div>
-            )}
-            {!body?.html && body?.text && (
-              // translate="yes" undoes <body>'s translate="no" for the message itself; React writes
-              // it as the element's whole text, so a translator has no React text node to break.
-              <div translate="yes" style={{
-                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                // Plain text follows a dark theme; switched to its original colors it gets the
-                // reading pane's white card (#228). A light theme leaves it as it always was.
-                ...(darkToggleShown && !bodyDark ? {
-                  padding: '14px 16px 12px', background: 'white', color: '#1a1a1a',
-                  borderRadius: 'var(--md-sys-shape-corner-extra-small)', border: '1px solid var(--border-subtle)',
-                } : {}),
-              }}>{body.text}</div>
-            )}
-          </MessageBodyTranslation>
+          {translationControls}
+          {displayBody?.html && (
+            // The same white padded card the reading pane wraps its body in. The frame's
+            // stylesheet zeroes body margin and padding, so the only gutter an email has
+            // is what the surrounding card provides: the reading pane gives every body
+            // 16px, while this card put the frame straight on the dark background and
+            // hand-typed mail (which brings no margins of its own) rendered flush against
+            // the frame edge. Now both views agree, and newsletters and fixed layouts are
+            // untouched — they keep whatever padding their own HTML carries, inside the
+            // same card the reading pane already gives them.
+            <div className="msg-card" style={{
+              padding: '14px 16px 12px',
+              // The frame's own background, so the card and the body read as one surface: the
+              // sender's dark background where their design sets one, otherwise the theme's.
+              background: shownDark ? (darkResult?.surface || 'var(--bg-primary)') : 'white',
+              borderRadius: 'var(--md-sys-shape-corner-extra-small)',
+              border: shownDark ? 'none' : '1px solid var(--border-subtle)',
+              overflow: 'hidden',
+            }}>
+              <MessageBodyView
+                iframeRef={iframeRef}
+                body={displayBody}
+                dark={bodyDark}
+                onDarkResult={setDarkResult}
+                messageId={message.id}
+                emailScaleRef={emailScaleRef}
+              />
+            </div>
+          )}
+          {!displayBody?.html && displayBody?.text && (
+            // translate="yes" undoes <body>'s translate="no" for the message itself; React writes
+            // it as the element's whole text, so a translator has no React text node to break.
+            <div translate="yes" style={{
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              // Plain text follows a dark theme; switched to its original colors it gets the
+              // reading pane's white card (#228). A light theme leaves it as it always was.
+              ...(darkToggleShown && !bodyDark ? {
+                padding: '14px 16px 12px', background: 'white', color: '#1a1a1a',
+                borderRadius: 'var(--md-sys-shape-corner-extra-small)', border: '1px solid var(--border-subtle)',
+              } : {}),
+            }}>{displayBody.text}</div>
+          )}
 
         </div>
       )}

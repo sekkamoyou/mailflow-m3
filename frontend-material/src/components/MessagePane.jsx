@@ -1,7 +1,7 @@
 import { spamFolderPaths as spamFolderPathsFor } from '../utils/spamFolders.js';
 import { descaleCss } from '../utils/uiScaleCss.js';
 import MessageBodyCard, { MessageTextBody } from './MessageBodyCard.jsx';
-import MessageBodyTranslation from './MessageBodyTranslation.jsx';
+import { useMessageBodyTranslation } from './MessageBodyTranslation.jsx';
 import MessageSenderCard from './MessageSenderCard.jsx';
 import { useMessageMetadata } from '../hooks/useMessageMetadata.js';
 import MaterialDialog from '../material/MaterialDialog.jsx';
@@ -230,6 +230,10 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
   const findInputRef = useRef(null);
   const [showTodoistModal, setShowTodoistModal] = useState(false);
   const [aiStatus, setAiStatus] = useState(null);
+  const aiSummariesEnabled = aiStatus?.enabled && aiStatus?.features?.summarize;
+  const { displayBody, controls: translationControls } = useMessageBodyTranslation({
+    enabled: aiSummariesEnabled && !loadingBody && !bodyError, messageId: selectedMessageId, body,
+  });
   // Per-action results for the current message: { [actionKey]: { status, text, label } }.
   // status: 'loading' | 'done' | 'error'. Restored from localStorage on message change.
   const ai = useAiActions(selectedMessageId, body, message?.subject);
@@ -246,9 +250,9 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
   // useMemo so prepared is available in the same render as body.html — no extra frame,
   // no flash of empty content between skeleton-gone and email-shown.
   const prepared = useMemo(() => {
-    if (!USE_DIV_RENDER || !body?.html) return null;
-    return prepareEmailHtml(body.html, windowMode ? `w${message?.id ?? 'preview'}` : String(message?.id ?? 'preview'));
-  }, [body?.html, message?.id, windowMode]);
+    if (!USE_DIV_RENDER || !displayBody?.html) return null;
+    return prepareEmailHtml(displayBody.html, windowMode ? `w${message?.id ?? 'preview'}` : String(message?.id ?? 'preview'));
+  }, [displayBody?.html, message?.id, windowMode]);
   const outerRef = useRef(null);
   const scaleRef = useRef(null);
   const innerRef = useRef(null);
@@ -750,8 +754,6 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
   }, []);
 
   const getFindRoot = useCallback(() => {
-    const translated = scrollContainerRef.current?.querySelector('.material-translated-body');
-    if (translated) return { doc: document, root: translated, iframe: null };
     if (!USE_DIV_RENDER && body?.html && iframeRef.current?.contentDocument?.body) {
       return {
         doc: iframeRef.current.contentDocument,
@@ -1298,7 +1300,6 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
     { key: 'print', label: t('message.print'), title: withShortcut(t('message.print'), 'printMessage'), icon: <PrintIcon />, onClick: handlePrint },
     darkToggleShown && { key: 'dark', label: darkToggleLabel, icon: <DarkToggleIcon shownDark={shownDark} />, onClick: toggleDark, pressed: shownDark, disabled: darkRefused },
   ].filter(Boolean) : [];
-  const aiSummariesEnabled = aiStatus?.enabled && aiStatus?.features?.summarize;
   const canAiClassify = aiSummariesEnabled && message && !message.category
     && (categorizationEnabled || accounts.find(a => a.id === message.account_id)?.categorization_enabled);
   const aiTools = aiSummariesEnabled && body ? {
@@ -1668,53 +1669,51 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
               saving={savingAllow}
             />
           )}
-          <MessageBodyTranslation enabled={aiSummariesEnabled} messageId={selectedMessageId}
-            body={body} isMobile={isMobile} dark={isDarkTheme(theme)}>
-            {body.html ? (
-              <MessageBodyCard isMobile={isMobile} shownDark={shownDark} surface={frameResult?.surface}>
-                {USE_DIV_RENDER ? (
-                  // Three-layer structure keeps concerns separate:
-                  // Outer  — click interception, height/overflow for scale-to-fit,
-                  //          position:relative + parent contain:layout contain hostile CSS.
-                  // Scale  — receives the CSS transform for scale-to-fit; carries no
-                  //          email CSS class so transform:none!important on .email-*
-                  //          never cancels the scale.
-                  // Inner  — scoped email CSS root (.email-* class + data attribute);
-                  //          transform:none!important here neutralises hostile body CSS
-                  //          without touching the scale wrapper above it.
-                  <div
-                    ref={outerRef}
-                    style={{ position: 'relative', width: '100%' }}
-                    onClick={handleEmailClick}
-                    onContextMenu={handlePaneContextMenu}
-                  >
-                    <div ref={scaleRef}>
-                      <div
-                        ref={innerRef}
-                        data-mailflow-email={prepared?.prefix}
-                        className={prepared?.prefix ?? ''}
-                        translate="yes"
-                        dangerouslySetInnerHTML={prepared ? { __html: prepared.html } : undefined}
-                      />
-                    </div>
+          {translationControls}
+          {displayBody.html ? (
+            <MessageBodyCard isMobile={isMobile} shownDark={shownDark} surface={frameResult?.surface}>
+              {USE_DIV_RENDER ? (
+                // Three-layer structure keeps concerns separate:
+                // Outer  — click interception, height/overflow for scale-to-fit,
+                //          position:relative + parent contain:layout contain hostile CSS.
+                // Scale  — receives the CSS transform for scale-to-fit; carries no
+                //          email CSS class so transform:none!important on .email-*
+                //          never cancels the scale.
+                // Inner  — scoped email CSS root (.email-* class + data attribute);
+                //          transform:none!important here neutralises hostile body CSS
+                //          without touching the scale wrapper above it.
+                <div
+                  ref={outerRef}
+                  style={{ position: 'relative', width: '100%' }}
+                  onClick={handleEmailClick}
+                  onContextMenu={handlePaneContextMenu}
+                >
+                  <div ref={scaleRef}>
+                    <div
+                      ref={innerRef}
+                      data-mailflow-email={prepared?.prefix}
+                      className={prepared?.prefix ?? ''}
+                      translate="yes"
+                      dangerouslySetInnerHTML={prepared ? { __html: prepared.html } : undefined}
+                    />
                   </div>
-                ) : (
-                  <MessageBodyView
-                    iframeRef={iframeRef}
-                    body={body}
-                    dark={bodyDark}
-                    onDarkResult={result => setDarkResult({ id: selectedMessageId, ...result })}
-                    messageId={selectedMessageId}
-                    emailScaleRef={emailScaleRef}
-                    hasNativeContextTarget={hasNativeContextTarget}
-                    onContextMenu={openPaneContextMenu}
-                  />
-                )}
-              </MessageBodyCard>
-            ) : (
-              <MessageTextBody text={body.text} isMobile={isMobile} dark={bodyDark} />
-            )}
-          </MessageBodyTranslation>
+                </div>
+              ) : (
+                <MessageBodyView
+                  iframeRef={iframeRef}
+                  body={displayBody}
+                  dark={bodyDark}
+                  onDarkResult={result => setDarkResult({ id: selectedMessageId, ...result })}
+                  messageId={selectedMessageId}
+                  emailScaleRef={emailScaleRef}
+                  hasNativeContextTarget={hasNativeContextTarget}
+                  onContextMenu={openPaneContextMenu}
+                />
+              )}
+            </MessageBodyCard>
+          ) : (
+            <MessageTextBody text={displayBody.text} isMobile={isMobile} dark={bodyDark} />
+          )}
         </div>
       )}
 

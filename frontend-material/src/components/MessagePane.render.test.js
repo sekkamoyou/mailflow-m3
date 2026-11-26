@@ -59,7 +59,7 @@ registerHooks({
 const dom = new JSDOM('<div id="root"></div>', { url: 'https://mail.example.invalid', pretendToBeVisual: true });
 Object.assign(globalThis, {
   window: dom.window, document: dom.window.document,
-  Image: dom.window.Image,
+  Image: dom.window.Image, DOMParser: dom.window.DOMParser,
   localStorage: dom.window.localStorage, CustomEvent: dom.window.CustomEvent,
   Node: dom.window.Node, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement,
   getComputedStyle: dom.window.getComputedStyle, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
@@ -677,9 +677,20 @@ describe('attachment viewer', () => {
 describe('message body rendering', () => {
   const MSG_HTML = { ...MSG_A, id: 'h1', uid: 11, subject: 'HTML body' };
   const MSG_TEXT = { ...MSG_A, id: 't1', uid: 12, subject: 'Text body' };
+  const MSG_MIXED = { ...MSG_A, id: 'mix1', uid: 13, subject: 'Mixed-language body' };
   const BODIES = {
     h1: { html: '<p id="hello">Hello from HTML</p>', text: '', attachments: [] },
     t1: { html: '', text: 'Plain text with https://example.com in it', attachments: [] },
+    mix1: {
+      html: '<style>.reservation { color: green }</style>' +
+        '<table class="reservation"><tr><td><strong>ご予約ありがとうございます！</strong></td></tr>' +
+        '<tr><td>受付 → 確認</td></tr></table>' +
+        '<p><a href="https://example.invalid/reservation?key=fixture-secret">予約内容を確認する</a>' +
+        '<img src="cid:fixture" width="44" alt="fixture"></p>' +
+        '<ul><li>Already in English → keep unchanged.</li></ul><span hidden>Hidden text</span>',
+      text: '',
+      attachments: [],
+    },
   };
   let originalFetch;
 
@@ -693,7 +704,7 @@ describe('message body rendering', () => {
       const id = /\/messages\/([^/]+)\/body/.exec(String(url))?.[1];
       return { ok: true, status: 200, json: async () => (BODIES[id] ?? {}), text: async () => '' };
     };
-    useStore.getState().setMessages?.([MSG_A, MSG_B, MSG_HTML, MSG_TEXT]);
+    useStore.getState().setMessages?.([MSG_A, MSG_B, MSG_HTML, MSG_TEXT, MSG_MIXED]);
   });
   after(() => { globalThis.fetch = originalFetch; });
 
@@ -727,7 +738,9 @@ describe('message body rendering', () => {
     }
   });
 
-  test('translation replaces the visible HTML body and toggles back without another AI request', async () => {
+  const parseFrame = frame => new DOMParser().parseFromString(frame.getAttribute('srcdoc'), 'text/html');
+
+  test('translation keeps the HTML reader and toggles back without another AI request', async () => {
     const { status, chat } = api.ai;
     const translation = 'Translated text with <strong>literal markup</strong>';
     let resolveTranslation;
@@ -742,29 +755,71 @@ describe('message body rendering', () => {
       await React.act(async () => root.render(null));
       await open('h1');
       const frame = document.querySelector('iframe');
+      const original = frame.getAttribute('srcdoc');
       assert.equal(button()?.textContent, 'message.translateBody');
       assert.equal(requests.length, 0);
       await React.act(async () => button().click());
       assert.equal(button().disabled, true);
-      assert.equal(frame.closest('[hidden]'), null);
+      assert.equal(frame.getAttribute('srcdoc'), original);
       assert.equal(requests[0].options.purpose, 'summarize');
       assert.match(requests[0].messages[0].content, /untrusted email text/);
-      assert.match(requests[0].messages[1].content, /Hello from HTML/);
+      assert.match(requests[0].messages[1].content, /\["Hello from HTML"\]/);
       assert.match(requests[0].messages[2].content, /Translate this email into English/);
-      await React.act(async () => resolveTranslation(translation));
+      await React.act(async () => resolveTranslation(JSON.stringify([translation])));
 
-      const translated = document.querySelector('.material-translated-body');
+      const translated = parseFrame(frame).querySelector('p#hello');
       assert.equal(translated?.textContent, translation);
       assert.equal(translated.children.length, 0);
       assert.equal(button().textContent, 'message.showOriginalBody');
-      assert.ok(frame.closest('[hidden]'));
+      assert.equal(document.querySelector('iframe'), frame);
       assert.equal(document.querySelector('.material-ai-result'), null);
       await React.act(async () => button().click());
-      assert.equal(document.querySelector('.material-translated-body'), null);
-      assert.equal(document.querySelector('iframe'), frame);
-      assert.equal(frame.closest('[hidden]'), null);
+      assert.equal(parseFrame(frame).querySelector('p#hello').textContent, 'Hello from HTML');
       await React.act(async () => button().click());
       assert.equal(requests.length, 1);
+    } finally {
+      await React.act(async () => root.render(null));
+      Object.assign(api.ai, { status, chat });
+    }
+  });
+
+  test('translation preserves table, styling, images, and links and removes source text echoed by AI', async () => {
+    const { status, chat } = api.ai;
+    api.ai.status = async () => ({ enabled: true, features: { summarize: true } });
+    let request;
+    api.ai.chat = async messages => {
+      request = messages[1].content;
+      return JSON.stringify([
+        'ご予約ありがとうございます！ → Thank you for booking!',
+        '受付 → 確認 → Reception → Confirmation',
+        '予約内容を確認する → Check booking details',
+        'Already in English → keep unchanged.',
+      ]);
+    };
+    try {
+      await React.act(async () => root.render(null));
+      await open('mix1');
+      const button = document.querySelector('.material-body-translation-controls button');
+      const frame = document.querySelector('iframe');
+      const original = parseFrame(frame);
+      await React.act(async () => button.click());
+      assert.equal(button.textContent, 'message.showOriginalBody');
+      assert.doesNotMatch(request, /fixture-secret|<table|Hidden text|cid:fixture|color: green/);
+
+      const translated = parseFrame(frame);
+      assert.deepEqual([...translated.querySelectorAll('table.reservation td')].map(td => td.textContent), [
+        'Thank you for booking!', 'Reception → Confirmation',
+      ]);
+      assert.equal(translated.querySelector('td > strong').textContent, 'Thank you for booking!');
+      assert.equal(translated.querySelector('style').textContent, original.querySelector('style').textContent);
+      assert.equal(translated.querySelector('a').textContent, 'Check booking details');
+      assert.equal(translated.querySelector('a').getAttribute('href'), original.querySelector('a').getAttribute('href'));
+      assert.equal(translated.querySelector('img').outerHTML, original.querySelector('img').outerHTML);
+      assert.equal(translated.querySelector('ul > li').textContent, 'Already in English → keep unchanged.');
+      assert.equal(translated.querySelector('[hidden]').textContent, 'Hidden text');
+
+      await React.act(async () => button.click());
+      assert.equal(parseFrame(frame).querySelector('.reservation strong').textContent, 'ご予約ありがとうございます！');
     } finally {
       await React.act(async () => root.render(null));
       Object.assign(api.ai, { status, chat });
@@ -787,16 +842,20 @@ describe('message body rendering', () => {
       await React.act(async () => button().click());
       await open('t1');
       assert.equal(signal.aborted, true);
-      await React.act(async () => resolveTranslation('Previous message'));
-      assert.equal(document.querySelector('.material-translated-body'), null);
+      await React.act(async () => resolveTranslation('["Previous message"]'));
+      assert.doesNotMatch(document.querySelector('.material-message-body .msg-card')?.textContent, /Previous message/);
       assert.equal(button().textContent, 'message.translateBody');
 
-      api.ai.chat = async () => { throw new Error('translation failed'); };
+      api.ai.chat = async () => '["Only half of the translation"]';
       await React.act(async () => button().click());
       assert.equal(document.querySelector('.material-body-translation-controls [role="alert"]')?.textContent,
         'message.translationFailed');
       assert.match(document.querySelector('.material-message-body .msg-card')?.textContent, /Plain text with/);
-      assert.equal(document.querySelector('.material-translated-body'), null);
+      api.ai.chat = async () => JSON.stringify(['Text before', 'and after the link']);
+      await React.act(async () => button().click());
+      const displayed = document.querySelector('.material-message-body .msg-card');
+      assert.equal(displayed.textContent, 'Text before https://example.com and after the link');
+      assert.equal(displayed.querySelector('a')?.getAttribute('href'), 'https://example.com');
     } finally {
       await React.act(async () => root.render(null));
       Object.assign(api.ai, { status, chat });

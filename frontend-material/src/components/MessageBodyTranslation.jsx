@@ -1,15 +1,13 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { buildAiActionMessages } from '../aiActions.js';
 import { MaterialButton, MaterialIcon } from '../material/controls.jsx';
 import { useStore } from '../store/index.js';
-import { aiMessageText } from '../utils/aiMessageText.js';
+import { translateBodyText } from '../utils/bodyTranslation.js';
 import { aiRuns } from '../utils/aiRunRegistry.js';
 import { api } from '../utils/api.js';
 import { htmlLang } from '../utils/browserLanguage.js';
-import MessageBodyCard from './MessageBodyCard.jsx';
 
-export default function MessageBodyTranslation({ enabled, messageId, body, isMobile, dark, children }) {
+export function useMessageBodyTranslation({ enabled, messageId, body }) {
   const { t, i18n } = useTranslation();
   const userId = useStore(state => state.user?.id);
   const language = htmlLang(i18n.language || 'en');
@@ -18,10 +16,11 @@ export default function MessageBodyTranslation({ enabled, messageId, body, isMob
   const sequence = useRef(0);
   const request = useRef(null);
   const [view, setView] = useState(null);
-  const canTranslate = enabled && messageId && (body?.text || body?.html);
-  const current = canTranslate && view?.scope === scope ? view : null;
+  const source = body?.html || body?.text;
+  const canTranslate = enabled && messageId && source;
+  const current = canTranslate && view?.scope === scope && view.source === source ? view : null;
 
-  useEffect(() => () => request.current?.abort(), [scope, enabled]);
+  useEffect(() => () => request.current?.abort(), [scope, enabled, source]);
 
   const toggle = async () => {
     if (current?.text) {
@@ -30,53 +29,37 @@ export default function MessageBodyTranslation({ enabled, messageId, body, isMob
     }
     if (request.current && !request.current.signal.aborted) return;
 
-    const source = aiMessageText(body, { full: true });
-    if (!source) {
-      setView({ scope, error: true });
-      return;
-    }
-
     const key = `body-translation-${instance}-${++sequence.current}`;
     const controller = aiRuns.start(messageId, key, new AbortController());
     request.current = controller;
-    setView({ scope, loading: true });
+    setView({ scope, source, loading: true });
     try {
       const target = new Intl.DisplayNames(['en'], { type: 'language' }).of(language);
-      const prompt = `Translate this email into ${target}. Preserve meaning and paragraph breaks. Return only the translation as plain text.`;
-      const { messages, truncated } = buildAiActionMessages(prompt, source);
-      const text = (await api.ai.chat(messages, { purpose: 'summarize', signal: controller.signal })).trim();
-      if (!controller.signal.aborted) {
-        setView(text ? { scope, text, truncated, translated: true } : { scope, error: true });
-      }
+      const text = await translateBodyText(body, target, messages =>
+        api.ai.chat(messages, { purpose: 'summarize', signal: controller.signal })
+      );
+      if (!controller.signal.aborted) setView({ scope, source, text, translated: true });
     } catch {
-      if (!controller.signal.aborted) setView({ scope, error: true });
+      if (!controller.signal.aborted) setView({ scope, source, error: true });
     } finally {
       if (request.current === controller) request.current = null;
       aiRuns.finish(messageId, key);
     }
   };
 
-  return <>
-    {canTranslate && <div className="material-body-translation-controls">
+  const displayBody = current?.translated ? {
+    ...body,
+    [body.html ? 'html' : 'text']: current.text,
+  } : body;
+  const controls = canTranslate ? (
+    <div className="material-body-translation-controls">
       <MaterialButton variant="text" type="button" onClick={toggle} disabled={current?.loading}>
         <MaterialIcon name={current?.translated ? 'description' : 'translate'} />
         {t(current?.translated ? 'message.showOriginalBody' : 'message.translateBody')}
       </MaterialButton>
       <span role="status">{current?.loading && t('message.translatingBody')}</span>
       {current?.error && <span role="alert">{t('message.translationFailed')}</span>}
-      {current?.translated && current.truncated && (
-        <span role="status">{t('message.aiTruncated', {
-          percent: Math.max(1, Math.floor((100 * current.truncated.shown) / current.truncated.total)),
-        })}</span>
-      )}
-    </div>}
-    {/* Keep the HTML frame and the original message layout mounted across the toggle. */}
-    <div hidden={Boolean(current?.translated)}>{children}</div>
-    {current?.translated && (
-      <MessageBodyCard isMobile={isMobile} shownDark={dark}>
-        <div className="material-translated-body" lang={language} dir="auto"
-          style={{ color: dark ? 'var(--text-primary)' : '#1a1a1a' }}>{current.text}</div>
-      </MessageBodyCard>
-    )}
-  </>;
+    </div>
+  ) : null;
+  return { displayBody, controls };
 }

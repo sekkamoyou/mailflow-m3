@@ -492,7 +492,8 @@ describe('conversation actions', () => {
       if (String(url).includes('/ai/status')) return { ok: true, status: 200, json: async () => ({ enabled: true, features: { summarize: true, compose: true } }) };
       if (String(url).includes('/ai/chat')) {
         if (JSON.parse(opts.body).messages.at(-1).content.startsWith('Translate this email')) {
-          const sse = 'data: {"choices":[{"delta":{"content":"Translated sample."}}]}\n\ndata: [DONE]\n\n';
+          const data = JSON.stringify({ choices: [{ delta: { content: '["Translated sample."]' } }] });
+          const sse = `data: ${data}\n\ndata: [DONE]\n\n`;
           return new Response(sse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
         }
         const sse = 'data: {"choices":[{"delta":{"content":"Short "}}]}\n\ndata: {"choices":[{"delta":{"content":"summary."}}]}\n\ndata: [DONE]\n\n';
@@ -550,13 +551,13 @@ describe('conversation actions', () => {
     await click(control());
     const request = requests.findLast(entry => entry.url.endsWith('/ai/chat'));
     assert.match(JSON.parse(request.body).messages.at(-1).content, /Translate this email into English/);
-    assert.equal(message.querySelector('.material-translated-body')?.textContent, 'Translated sample.');
-    assert.ok(frame.closest('[hidden]'));
+    const bodyText = () => new dom.window.DOMParser()
+      .parseFromString(frame.getAttribute('srcdoc'), 'text/html').querySelector('p').textContent;
+    assert.equal(bodyText(), 'Translated sample.');
     assert.equal(control()?.textContent, 'message.showOriginalBody');
     await click(control());
-    assert.equal(message.querySelector('.material-translated-body'), null);
-    assert.ok(message.querySelector('iframe') === frame);
-    assert.equal(frame.closest('[hidden]'), null);
+    assert.equal(bodyText(), 'body of m1');
+    assert.equal(message.querySelector('iframe'), frame);
   });
 
   test('the reply menu opens in its portal and Escape restores the trigger', async () => {
