@@ -145,6 +145,70 @@ test('plain notices time out but action notices stay until used or dismissed', a
   assert.ok(!snackbar());
 });
 
+function mockExitAnimation(t) {
+  const animations = [];
+  const prototype = window.HTMLElement.prototype;
+  Object.defineProperty(prototype, 'animate', {
+    configurable: true,
+    value(frames, options) {
+      let finish;
+      const finished = new Promise(resolve => { finish = resolve; });
+      animations.push({ finish, frames, options });
+      return { finished, cancel() {} };
+    },
+  });
+  t.after(() => delete prototype.animate);
+  return animations;
+}
+
+test('auto and manual dismissal fade the old toast before displaying the next one', async t => {
+  const animations = mockExitAnimation(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  await mount();
+  await add({ title: 'Saved' });
+  await add({ title: 'Sent', onAction: () => assert.fail('dismiss ran View') });
+  await React.act(async () => t.mock.timers.tick(5000));
+  assert.equal(useStore.getState().notifications.length, 1);
+  assert.equal(snackbar().textContent, 'Saved');
+  assert.equal(snackbar().inert, true);
+  assert.deepEqual(animations[0].frames.at(-1), { opacity: 0 });
+  assert.equal(animations[0].options.duration, 100);
+  await React.act(async () => animations[0].finish());
+
+  assert.equal(action().textContent, 'common.view');
+  await React.act(async () => dismiss().click());
+  assert.equal(useStore.getState().notifications.length, 0);
+  assert.equal(snackbar().inert, true);
+  await React.act(async () => action().click());
+  await React.act(async () => animations[1].finish());
+  assert.ok(!snackbar());
+});
+
+test('Undo expires on its original deadline while the visual toast fades', async t => {
+  const animations = mockExitAnimation(t);
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 100 });
+  await mount();
+  await add({ title: 'Deleted', onUndo: () => assert.fail('expired Undo ran') });
+  await React.act(async () => t.mock.timers.tick(4499));
+  assert.equal(snackbar().inert, undefined);
+  await React.act(async () => t.mock.timers.tick(1));
+  assert.equal(useStore.getState().notifications.length, 0);
+  assert.equal(snackbar().inert, true);
+  await React.act(async () => action().click());
+  await React.act(async () => animations[0].finish());
+  assert.ok(!snackbar());
+});
+
+test('reduced motion dismisses without starting a fade', async t => {
+  const animations = mockExitAnimation(t);
+  t.mock.method(window, 'matchMedia', () => ({ matches: true }));
+  await mount();
+  await add({ title: 'Sent', onAction: () => {} });
+  await React.act(async () => dismiss().click());
+  assert.equal(animations.length, 0);
+  assert.ok(!snackbar());
+});
+
 test('one snackbar shows at a time, keeping the earlier Undo available within its original window', async () => {
   await mount({ mobile: true });
   let undone = 0;

@@ -11,6 +11,7 @@ const offScreen = {
 };
 // How many recent notifications a live region keeps; older ones leave it unannounced.
 const ANNOUNCED_KEPT = 3;
+const SNACKBAR_EXIT_MS = 100;
 
 // What a screen reader hears of a notification: its title, and its body when that is text.
 export const announcement = n => [n.title, typeof n.body === 'string' ? n.body : null]
@@ -54,6 +55,10 @@ export default function NotificationToasts() {
   const { notifications, removeNotification, expireNotificationUndo } = useStore();
   const undo = notifications.find(isUndoAvailable);
   const notice = undo || notifications.findLast(n => !n.onUndo);
+  const [displayed, setDisplayed] = useState(notice);
+  // After removal, keep only the visual toast until its fade finishes.
+  const exiting = displayed && !notifications.some(n => n.id === displayed.id);
+  if (!exiting && displayed !== notice) setDisplayed(notice);
 
   useEffect(() => {
     const pending = notifications.filter(n => n.onUndo && Number.isFinite(n.undoExpiresAt));
@@ -70,21 +75,22 @@ export default function NotificationToasts() {
 
   return <>
     <Announcer notifications={notifications} />
-    {notice && <Snackbar key={`${notice.id}:${Boolean(undo)}`} notice={notice} onDismiss={removeNotification} />}
+    {displayed && <Snackbar key={`${displayed.id}:${Boolean(displayed.onUndo)}`} notice={displayed}
+      exiting={exiting} onExited={setDisplayed} onDismiss={removeNotification} />}
   </>;
 }
 
-function Snackbar({ notice, onDismiss }) {
+function Snackbar({ notice, exiting, onExited, onDismiss }) {
   const { t } = useTranslation();
   const [interacting, setInteracting] = useState(false);
   const panel = useRef(null);
   const returnFocus = useRef(null);
   const sticky = notice.onAction || notice.persistent || notice.type === 'error';
   useEffect(() => {
-    if (notice.onUndo || sticky || interacting) return;
+    if (exiting || notice.onUndo || sticky || interacting) return;
     const timer = setTimeout(() => onDismiss(notice.id), 5000);
     return () => clearTimeout(timer);
-  }, [notice, onDismiss, sticky, interacting]);
+  }, [notice, onDismiss, exiting, sticky, interacting]);
 
   useLayoutEffect(() => {
     const element = panel.current;
@@ -97,8 +103,33 @@ function Snackbar({ notice, onDismiss }) {
     };
   }, []);
 
+  useLayoutEffect(() => {
+    if (!exiting) return;
+    const element = panel.current;
+    const view = element.ownerDocument.defaultView;
+    if (!element.animate || view.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      onExited(undefined);
+      return;
+    }
+    const target = returnFocus.current;
+    if (element.contains(element.ownerDocument.activeElement) && target?.isConnected) target.focus({ preventScroll: true });
+    element.inert = true;
+    const animation = element.animate(
+      [{ opacity: view.getComputedStyle(element).opacity }, { opacity: 0 }],
+      { duration: SNACKBAR_EXIT_MS, fill: 'forwards' },
+    );
+    let cancelled = false;
+    const finish = () => { if (!cancelled) onExited(undefined); };
+    animation.finished.then(finish, finish);
+    return () => {
+      cancelled = true;
+      animation.cancel();
+      element.inert = false;
+    };
+  }, [exiting, onExited]);
+
   const runAction = () => {
-    if (notice.onUndo && !isUndoAvailable(notice)) return;
+    if (exiting || (notice.onUndo && !isUndoAvailable(notice))) return;
     onDismiss(notice.id);
     void (notice.onUndo || notice.onAction)();
   };
@@ -123,7 +154,7 @@ function Snackbar({ notice, onDismiss }) {
         {notice.onUndo ? t('common.undo') : notice.actionLabel || t('common.view')}
       </MaterialButton>}
       <MaterialButton variant="icon" className="md-snackbar-close" aria-label={t('common.dismiss')}
-        onClick={() => onDismiss(notice.id)}>
+        onClick={exiting ? undefined : () => onDismiss(notice.id)}>
         <MaterialIcon name="close" />
       </MaterialButton>
     </div>}
