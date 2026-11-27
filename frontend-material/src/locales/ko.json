@@ -469,7 +469,7 @@
     "pageOf": "{{total}} 중 {{current}} 페이지",
     "loadMore": "더 보기",
     "deleted": {
-      "body": "제거됨.",
+      "body": "",
       "title": "메시지가 삭제되었습니다.",
       "failBody": "메시지를 삭제할 수 없습니다.",
       "failTitle": "삭제 실패",
@@ -483,9 +483,9 @@
     "noMoreMessages": "더 이상 메시지가 없습니다",
     "archiveSelected": "선택 항목 보관",
     "bulkDeleted": {
-      "title_one": "{{count}} 메시지가 삭제되었습니다.",
-      "title_other": "{{count}} 메시지가 삭제되었습니다.",
-      "body": "제거됨.",
+      "title_one": "메시지 {{count}}개가 삭제되었습니다.",
+      "title_other": "메시지 {{count}}개가 삭제되었습니다.",
+      "body": "",
       "failBody_other": "{{count}} 메시지를 삭제할 수 없습니다.",
       "failBody_one": "{{count}} 메시지를 삭제할 수 없습니다.",
       "failTitle": "삭제 실패"
