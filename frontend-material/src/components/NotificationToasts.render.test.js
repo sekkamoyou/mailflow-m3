@@ -119,6 +119,32 @@ const snackbar = () => document.querySelector('.material-snackbar');
 const action = () => snackbar().querySelector('.md-snackbar-action');
 const dismiss = () => snackbar().querySelector('.md-snackbar-close');
 
+test('plain notices time out but action notices stay until used or dismissed', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  await mount();
+  await add({ title: 'Saved' });
+  assert.ok(!dismiss(), 'A plain notice has no close button');
+  await React.act(async () => t.mock.timers.tick(4999));
+  assert.ok(snackbar());
+  await React.act(async () => t.mock.timers.tick(1));
+  assert.ok(!snackbar(), 'A plain notice expires after five seconds');
+
+  let viewed = 0;
+  const sent = { title: 'Sent', onAction: () => viewed++ };
+  await add(sent);
+  await React.act(async () => t.mock.timers.tick(20_000));
+  assert.ok(snackbar(), 'A View notice stays visible past the old timeout');
+  assert.equal(action().textContent, 'common.view');
+  await React.act(async () => action().click());
+  assert.equal(viewed, 1);
+  assert.ok(!snackbar());
+
+  await add(sent);
+  await React.act(async () => dismiss().click());
+  assert.equal(viewed, 1);
+  assert.ok(!snackbar());
+});
+
 test('one snackbar shows at a time, keeping the earlier Undo available within its original window', async () => {
   await mount({ mobile: true });
   let undone = 0;

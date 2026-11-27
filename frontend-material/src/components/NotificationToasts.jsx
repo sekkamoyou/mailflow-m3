@@ -79,10 +79,10 @@ function Snackbar({ notice, onDismiss }) {
   const [interacting, setInteracting] = useState(false);
   const panel = useRef(null);
   const returnFocus = useRef(null);
-  const sticky = notice.persistent || notice.type === 'error';
+  const sticky = notice.onAction || notice.persistent || notice.type === 'error';
   useEffect(() => {
     if (notice.onUndo || sticky || interacting) return;
-    const timer = setTimeout(() => onDismiss(notice.id), notice.onAction ? 10000 : 5000);
+    const timer = setTimeout(() => onDismiss(notice.id), 5000);
     return () => clearTimeout(timer);
   }, [notice, onDismiss, sticky, interacting]);
 
@@ -118,12 +118,14 @@ function Snackbar({ notice, onDismiss }) {
       <div>{notice.title}</div>
       {notice.body && <div>{notice.body}</div>}
     </div>
-    <MaterialButton variant="icon" className="md-snackbar-close" aria-label={t('common.dismiss')}
-      onClick={() => onDismiss(notice.id)}>
-      <MaterialIcon name="close" />
-    </MaterialButton>
-    {(notice.onUndo || notice.onAction) && <MaterialButton variant="text" className="md-snackbar-action" onClick={runAction}>
-      {notice.onUndo ? t('common.undo') : notice.actionLabel || t('common.view')}
-    </MaterialButton>}
+    {(notice.onUndo || sticky) && <div className="md-snackbar-controls">
+      {(notice.onUndo || notice.onAction) && <MaterialButton variant="text" className="md-snackbar-action" onClick={runAction}>
+        {notice.onUndo ? t('common.undo') : notice.actionLabel || t('common.view')}
+      </MaterialButton>}
+      <MaterialButton variant="icon" className="md-snackbar-close" aria-label={t('common.dismiss')}
+        onClick={() => onDismiss(notice.id)}>
+        <MaterialIcon name="close" />
+      </MaterialButton>
+    </div>}
   </div>;
 }
