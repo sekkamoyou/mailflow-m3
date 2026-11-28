@@ -99,29 +99,29 @@ describe('planIntegrityFlagScan', () => {
 
 // ── The safety property the cheap path depends on ────────────────────────────
 //
-// A pass that skipped the full scan has only ONE view of the UID set (SEARCH, cross-checked
-// against the count from SELECT). That is enough to detect a gap and schedule a backfill,
-// which is non-destructive. It is NOT enough to prune cached rows: an expunge plus an
-// arrival between SELECT and SEARCH leaves the count unchanged while the set differs, which
-// is exactly the case the two-view check exists to catch.
+// Without a full FETCH, only the NAVER INBOX surplus path may prune. An existing STATUS
+// observation must corroborate SEARCH and the selected mailbox before and after it.
 
 import { ImapManager, createKeyedSemaphore, clearChangedSinceIgnored, flagScanLowUid, noteChangedSinceScan } from './imapManager.js';
 import { query } from './db.js';
 
-function managerFor({ uids, exists, condstore, storedModseq, localUids }) {
+function managerFor({ uids, exists, condstore, storedModseq, localUids, searchUpdate }) {
   const lock = { release: vi.fn() };
   const client = {
-    mailbox: { exists, uidValidity: 8n, highestModseq: 999n },
+    mailbox: { exists, uidValidity: 8n, uidNext: 20, highestModseq: 999n },
     capabilities: condstore ? new Map([['CONDSTORE', true]]) : new Map(),
     getMailboxLock: async () => lock,
-    search: async () => uids,
+    search: async () => { Object.assign(client.mailbox, searchUpdate); return uids; },
     fetch: async function* () { /* changedsince: nothing changed */ },
   };
   // Clear the call history, not just the implementation: assertions below search every
   // recorded call, and a previous test's checkpoint would otherwise be found first.
   query.mockClear();
-  query.mockImplementation(async (sql) => {
+  query.mockImplementation(async (sql, params) => {
     if (sql.includes('status_synced_modseq FROM folders')) return { rows: [{ status_synced_modseq: storedModseq }] };
+    if (sql.startsWith('DELETE FROM messages')) {
+      return { rows: params[2].map(uid => ({ thread_key: String(uid) })), rowCount: params[2].length };
+    }
     if (sql.includes('FROM messages')) return { rows: localUids.map(uid => ({ uid: String(uid), synced_at: null })) };
     if (sql.includes('unfetchable_uids')) return { rows: [] };
     return { rows: [], rowCount: 0 };
@@ -159,6 +159,42 @@ describe('a pass without the full scan', () => {
     });
     await mgr._refreshObservedFolder(acct, 'INBOX', observed);
     expect(mgr.backfillMessages).toHaveBeenCalledWith(acct, 'INBOX');
+  });
+});
+
+describe('NAVER INBOX deletion found by the existing status pass', () => {
+  const acct = { id: 'naver-fixture', user_id: 'u', imap_host: 'imap.naver.com' };
+  const observed = { messages: 1, uidValidity: 8n, uidNext: 20, highestModseq: 999n };
+  const run = (overrides = {}) => managerFor({
+    uids: [1], exists: 1, condstore: true, storedModseq: '999', localUids: [1, 2, 3], ...overrides,
+  });
+  const deletes = () => query.mock.calls.filter(([sql]) => sql.startsWith('DELETE FROM messages'));
+
+  it('removes only absent, unguarded UIDs and uses the list refresh event without an IMAP count refresh', async () => {
+    const mgr = run();
+    mgr._isMoveUidGuarded = (_accountId, _path, uid) => uid === 3;
+    await mgr._refreshObservedFolder(acct, 'INBOX', observed);
+    expect(deletes()).toHaveLength(1);
+    expect(deletes()[0][1]).toEqual([acct.id, 'INBOX', [2], expect.any(Date), '8']);
+    expect(mgr.broadcast).toHaveBeenCalledExactlyOnceWith({ type: 'sync_complete', accountId: acct.id }, 'u');
+  });
+
+  it.each([
+    ['a different folder', 'Sent', {}, {}],
+    ['a different provider', 'INBOX', {}, { imap_host: 'imap.example.com' }],
+    ['a changed UIDNEXT', 'INBOX', { searchUpdate: { uidNext: 21 } }, {}],
+    ['a changed UIDVALIDITY', 'INBOX', { searchUpdate: { uidValidity: 9n } }, {}],
+    ['an uncached server UID', 'INBOX', { uids: [4] }, {}],
+  ])('keeps cached rows with %s', async (_label, path, options, account) => {
+    const mgr = run(options);
+    await mgr._refreshObservedFolder({ ...acct, ...account }, path, observed);
+    expect(deletes()).toHaveLength(0);
+  });
+
+  it('rejects an incomplete UID list before deleting anything', async () => {
+    const mgr = run({ uids: [] });
+    await expect(mgr._refreshObservedFolder(acct, 'INBOX', observed)).rejects.toThrow('membership changed');
+    expect(deletes()).toHaveLength(0);
   });
 });
 

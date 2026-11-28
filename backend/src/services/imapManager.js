@@ -4651,6 +4651,15 @@ export class ImapManager {
           // A deferred scan returned above, so reaching here means the flags are covered.
           flagsCovered = true;
 
+          // NAVER may provide no EXPUNGE event. Its independent STATUS sample can
+          // corroborate a stable INBOX selection in a pass that skipped full FETCH.
+          const matchesNaverInboxStatus = () =>
+            client.mailbox?.exists === observed.messages &&
+            Number(client.mailbox?.uidNext) === observed.uidNext &&
+            String(client.mailbox?.uidValidity) === String(observed.uidValidity);
+          const naverInbox = !fetched && path === 'INBOX' &&
+            account.imap_host?.toLowerCase() === 'imap.naver.com' && matchesNaverInboxStatus();
+
           const uids = await client.search({ all: true }, { uid: true });
           if (!Array.isArray(uids)) throw new Error('Incomplete folder UID snapshot');
           const server = new Set(uids);
@@ -4662,9 +4671,7 @@ export class ImapManager {
               throw new Error('Folder membership changed during integrity sync');
             }
           } else if (server.size !== client.mailbox.exists) {
-            // Without that second view, the count the server reported at SELECT is the check
-            // we can afford. It catches a mailbox moving under us, which is enough to trust
-            // the set for GAP DETECTION. It is deliberately not trusted for deletion.
+            // A short or changing UID list is neither a gap nor a deletion snapshot.
             throw new Error('Folder membership changed during integrity sync');
           }
           if (expired) throw new Error('Folder integrity sync expired');
@@ -4710,28 +4717,37 @@ export class ImapManager {
           // check finds them missing again. Observed on iCloud, 35 cycles in five hours.
           const suppressed = await suppressedUids(account.id, path, observed.uidValidity);
           missing = hasRealGap(server, local, suppressed);
-          // Deleting a cached row is the one irreversible thing this pass does, so it happens
-          // only on a pass that held the full two-view snapshot above. A cheap pass still
-          // detects and backfills gaps, which is non-destructive; it just does not prune.
-          // The practical effect is that a folder too large to scan cheaply keeps rows for
-          // messages deleted elsewhere until a scan is affordable, which is a far better
-          // failure than pruning against a set we could not corroborate.
-          const gone = fetched
-            ? rows.filter(r => !server.has(Number(r.uid)) && (!r.synced_at || new Date(r.synced_at) < cutoff)
-                && !this._isMoveUidGuarded(account.id, path, Number(r.uid))).map(r => Number(r.uid))
+          // For NAVER, prune only a pure surplus: every current server UID is
+          // already cached, and STATUS and SELECT still agree across SEARCH.
+          const confirmedNaverSurplus = naverInbox && matchesNaverInboxStatus() &&
+            server.size === uids.length && server.size === observed.messages &&
+            rows.filter(r => !r.is_deleted).length > observed.messages &&
+            uids.every(uid => Number.isSafeInteger(uid) && uid > 0 && uid < observed.uidNext && local.has(uid));
+          const gone = fetched || confirmedNaverSurplus
+            ? rows.filter(r => {
+              const uid = Number(r.uid);
+              return !server.has(uid) && (!r.synced_at || new Date(r.synced_at) < cutoff) &&
+                !this._isMoveUidGuarded(account.id, path, uid) &&
+                (fetched || (!r.is_deleted && uid > 0 && uid < observed.uidNext));
+            }).map(r => Number(r.uid))
             : [];
           if (expired) throw new Error('Folder integrity sync expired');
+          let removed = 0;
           if (gone.length) {
             const deleted = await query('DELETE FROM messages WHERE account_id=$1 AND folder=$2 AND uid=ANY($3::bigint[]) AND (synced_at IS NULL OR synced_at < $4) AND EXISTS (SELECT 1 FROM folders WHERE account_id=$1 AND path=$2 AND uid_validity=$5) RETURNING thread_key', [account.id, path, gone, cutoff, String(observed.uidValidity)]);
+            removed = deleted.rowCount ?? deleted.rows.length;
             try {
               await recountFolderRows(account.id, path);
             } finally {
               notifyMessageRowsDeleted(account, deleted.rows, path);
             }
           }
-          if (changed || gone.length) {
-            this.broadcast({ type: 'flags_synced', accountId: account.id }, account.user_id);
-            await emitSectionsChanged(this.pluginFacade, account, changed + gone.length);
+          if (changed || removed) {
+            // The NAVER deletion used the latest STATUS. Refresh the list without
+            // scheduling another IMAP count check for a verified cache-only change.
+            const type = changed || fetched ? 'flags_synced' : 'sync_complete';
+            this.broadcast({ type, accountId: account.id }, account.user_id);
+            await emitSectionsChanged(this.pluginFacade, account, changed + removed);
           }
           complete = !missing;
         } finally { lock.release(); }
