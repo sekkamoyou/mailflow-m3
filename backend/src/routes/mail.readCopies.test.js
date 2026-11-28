@@ -139,8 +139,26 @@ describe('read-copy production routes and IMAP', () => {
     });
   }
   it('pushes the unselected bulk sibling too', async () => {
-    expect((await bulk([A], true)).status).toBe(200); await settle();
-    expect(wire).toEqual([['INBOX', '11', true], ['Watch', '42', true]]);
+    const sender = '11111111-1111-4111-8111-111111111111';
+    const broadcast = vi.spyOn(imapManager, 'broadcast');
+    try {
+      const response = await fetch(`${url}/bulk-read`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-MailFlow-Read-Client': sender },
+        body: JSON.stringify({ ids: [A], read: true }),
+      });
+      expect(response.status).toBe(200); await settle();
+      expect(wire).toEqual([['INBOX', '11', true], ['Watch', '42', true]]);
+      expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'message_flags', readClient: sender, changedAt: expect.any(String),
+        changes: [
+          { id: A, accountId: account.id, folder: 'INBOX', is_read: true, optimistic: true },
+          { id: B, accountId: account.id, folder: 'Watch', is_read: true },
+        ],
+      }), 'reader');
+    } finally {
+      broadcast.mockRestore();
+    }
   });
   it('propagates bulk unread to the unselected copy', async () => {
     for (const r of rows) r.is_read = true;

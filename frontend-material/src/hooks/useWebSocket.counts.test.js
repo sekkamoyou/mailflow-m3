@@ -18,7 +18,7 @@ globalThis.WebSocket = FakeSocket;
 const React = await import('react');
 const { createRoot } = await import('react-dom/client');
 const { useStore } = await import('../store/index.js');
-const { api } = await import('../utils/api.js');
+const { api, readClient } = await import('../utils/api.js');
 const { useWebSocket } = await import('./useWebSocket.js');
 function App() { useWebSocket(); return null; }
 test('already-seen arrivals do not inflate badges; count events update without refreshing the message list', async () => {
@@ -50,6 +50,14 @@ test('already-seen arrivals do not inflate badges; count events update without r
       await React.act(async () => socket.onmessage({ data: JSON.stringify({ type: 'new_messages', accountId: 'a',
         folder, count: 1, messages: [{ id: `new-in-${folder}` }] }) }));
     }
+    const change = (id, folder, read, extra = {}) => ({ id, accountId: 'a', folder, is_read: read, ...extra });
+    const flags = { type: 'message_flags', changedAt: new Date(Date.now() + 5).toISOString(),
+      changes: [change('not-loaded', 'INBOX', true), change('sent', 'Sent', true),
+        change('own', 'INBOX', true, { optimistic: true })], readClient };
+    await React.act(async () => socket.onmessage({ data: JSON.stringify(flags) }));
+    assert.equal(useStore.getState().unreadCounts.byAccount.a, 1, 'only the offscreen remote Inbox change affects the badge');
+    await React.act(async () => socket.onmessage({ data: JSON.stringify(flags) }));
+    assert.equal(useStore.getState().unreadCounts.byAccount.a, 1, 'duplicate events do not change the badge again');
     assert.equal(useStore.getState().replyDraftRevision, revision + 1, 'new_messages leaves the indicators to drafts_changed');
   } finally {
     await React.act(async () => root.unmount());

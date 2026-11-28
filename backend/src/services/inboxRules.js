@@ -457,6 +457,11 @@ export function newMailPushPayload(alertMessages, alertCount) {
     url: latest.id ? `/?m=${latest.id}` : '/',
   };
   if (alertCount === 1 && latest.id) payload.messageId = latest.id;
+  // Keep Web Push payloads small; an incomplete group cannot be cleared safely.
+  if (alertCount > 1 && alertCount <= 25 && payload.pushMessageIds.length === alertCount
+      && new Set(payload.pushMessageIds.filter(Boolean)).size === alertCount) {
+    payload.messageIds = payload.pushMessageIds;
+  }
   return payload;
 }
 

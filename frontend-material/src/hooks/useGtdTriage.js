@@ -138,7 +138,7 @@ export function useGtdTriage() {
         threadMessages = Array.isArray(data?.messages) ? data.messages : [];
         return data;
       });
-      await api.bulkRead(withoutActedSince(ids, since, [thread, ...threadMessages]), read, { since });
+      await api.bulkRead(withoutActedSince(ids, since, [thread, ...threadMessages]), read, { since, optimisticCount: false });
       // Belt-and-braces under the WS read fan-out: reconcile the sidebar counts (the
       // debounce coalesces this with any gtd_sections_updated the mark triggers).
       scheduleGtdSectionsFetch();

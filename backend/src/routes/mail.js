@@ -1068,11 +1068,29 @@ router.get('/messages/:id/raw.eml', async (req, res) => {
 
 const WITH_SIBLING_COUNT = `m.*, a.user_id, ${SIBLING_COUNT}`;
 
+function broadcastReadFlags(req, rows, read, optimisticIds = []) {
+  if (!rows.length) return;
+  const sender = req.get('X-MailFlow-Read-Client');
+  const accounted = new Set(optimisticIds);
+  const changedAt = new Date().toISOString();
+  for (let offset = 0; offset < rows.length; offset += 500) {
+    const changes = rows.slice(offset, offset + 500).map(row => ({
+      id: row.id, accountId: row.account_id, folder: row.folder, is_read: read,
+      ...(accounted.has(row.id) ? { optimistic: true } : {}),
+    }));
+    imapManager.broadcast({
+      type: 'message_flags', changedAt, changes,
+      ...(UUID_RE.test(sender || '') ? { readClient: sender } : {}),
+    }, req.session.userId);
+  }
+}
+
 // Mark read/unread
 router.patch('/messages/:id/read', async (req, res) => {
   const { id } = req.params;
   if (!UUID_RE.test(id)) return res.status(400).json({ error: 'Invalid message id' });
   const { read } = req.body;
+  if (typeof read !== 'boolean') return res.status(400).json({ error: 'read must be a boolean' });
 
   const message = await findOwnedMessage(req.session.userId, id, { columns: WITH_SIBLING_COUNT });
   if (!message) return res.status(404).json({ error: 'Message not found' });
@@ -1088,9 +1106,7 @@ router.patch('/messages/:id/read', async (req, res) => {
   // Keep the cached folder unread_count in sync so pagination totals stay accurate.
   if (!!message.is_read !== !!read) {
     adjustFolderCounts(message.account_id, message.folder, 0, read ? -1 : 1);
-    // Notify the user's OTHER sessions so a read/unread on one device reflects on the rest
-    // in place, without a full folder refetch (the originating device already applied it).
-    imapManager.broadcast({ type: 'message_flags', accountId: message.account_id, changes: [{ id, is_read: read }] }, req.session.userId);
+    broadcastReadFlags(req, [{ ...message, id }], read);
   }
 
   // GTD: a labeled message owns a sibling row per folder. Fan the read change out to
@@ -1103,6 +1119,7 @@ router.patch('/messages/:id/read', async (req, res) => {
   let copies = [];
   if (Number(message.sibling_count) > 1 && await accountMaintainsLabelSiblings(message.account_id)) {
     const flipped = await fanOutReadToSiblings(message.account_id, message.message_id, read) || [];
+    broadcastReadFlags(req, flipped.filter(row => !row.is_deleted), read);
     if (account && !imapManager.isLabelStore(account)) copies = flipped;
   }
 
@@ -1115,6 +1132,7 @@ router.patch('/messages/:id/read', async (req, res) => {
     // the user's change once the 30s local-wins window lapses.
     imapManager._enqueueFlagPush(message.account_id, id, '\\Seen', read);
   }
+  imapManager.scheduleCountRefresh?.(message.account_id, [message.folder]);
 
   if (copies.length) {
     (async () => {
@@ -1240,10 +1258,12 @@ router.post('/mark-all-read', async (req, res) => {
   // As bulk-read does: the same message's copies in label folders (GTD) are read too, and on a
   // server that keeps them as separate messages their \Seen is written as well.
   const changed = (marked?.rows || []).filter(r => !r.was_read);
+  broadcastReadFlags(req, changed.map(row => ({ ...row, account_id: accountId, folder })), true);
   // A failure here must not keep the folder's own \Seen write below from starting.
   try {
     if (changed.length && await accountMaintainsLabelSiblings(accountId)) {
       const siblings = await fanOutBulkReadToSiblings(changed.map(r => r.id), true) || [];
+      broadcastReadFlags(req, siblings.filter(row => !row.is_deleted), true);
       if (siblings.length && !imapManager.isLabelStore(account)) {
         (async () => {
           const acted = changed.map(r => ({ ...r, account_id: accountId, folder }));
@@ -1515,7 +1535,7 @@ router.post('/messages/bulk-read', async (req, res) => {
     const gtdUpdatedIds = toUpdate.filter(m => gtdAccts.has(m.account_id)).map(m => m.id);
     const siblings = gtdUpdatedIds.length ? await fanOutBulkReadToSiblings(gtdUpdatedIds, read) || [] : [];
     // Reflect the bulk read/unread change on the user's other sessions in place (no full refetch).
-    imapManager.broadcast({ type: 'message_flags', changes: toUpdate.map(m => ({ id: m.id, is_read: read })) }, req.session.userId);
+    broadcastReadFlags(req, [...toUpdate, ...siblings.filter(row => !row.is_deleted)], read, toUpdate.map(row => row.id));
 
     // IMAP flag updates — group by account to fetch each account row once.
     const byAccount = {};
@@ -1538,6 +1558,7 @@ router.post('/messages/bulk-read', async (req, res) => {
           imapManager._resolveFlagPush(accountId, msgs[i].id, '\\Seen'); // confirmed
         }
       });
+      imapManager.scheduleCountRefresh?.(accountId, [...new Set(msgs.map(msg => msg.folder))]);
       if (siblings.length && gtdAccts.has(accountId) && account && !imapManager.isLabelStore(account)) {
         (async () => {
           const targets = [];

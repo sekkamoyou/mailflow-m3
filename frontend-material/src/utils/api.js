@@ -9,6 +9,7 @@ const BASE = '/api';
 // in the app must include this same header (see CSRF_HEADER).
 export const CSRF_HEADER = 'X-Requested-With';
 export const CSRF_VALUE = 'MailFlow';
+export const readClient = globalThis.crypto?.randomUUID?.();
 const messageBodyRequests = new Map();
 // Hover prefetches of bodies under way (prefetchMessageBody), by the same keys.
 const prefetchRequests = new Map();
@@ -431,7 +432,8 @@ export const api = {
   },
   // Per message, in the order the user acted (utils/readOrder.js). `since`, from reserveReadIntent,
   // leaves out the messages acted on after it was taken.
-  bulkRead: (ids, read, { since } = {}) => orderedRead(ids, list => request('POST', '/mail/messages/bulk-read', { ids: list, read }).then(result => {
+  bulkRead: (ids, read, { since, optimisticCount = true } = {}) => orderedRead(ids, list => request('POST', '/mail/messages/bulk-read',
+    { ids: list, read }, optimisticCount && readClient ? { 'X-MailFlow-Read-Client': readClient } : undefined).then(result => {
     if (read) void dismissReadNotifications(list, api.getMessage);
     return result;
   }), { since }),

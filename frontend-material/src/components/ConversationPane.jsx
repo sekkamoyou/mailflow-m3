@@ -26,6 +26,7 @@ import ContextMenu from './ContextMenu.jsx';
 import { takeSwipeConversation } from '../utils/swipeConversation.js';
 import { applyReadGuard } from '../utils/pendingReads.js';
 import { applyDeleteGuard } from '../utils/pendingDeletes.js';
+import { MESSAGE_FLAGS_EVENT } from '../hooks/useWebSocket.js';
 import { ActionBtn, MessageTools, ArchiveIcon, MoveIcon, SnoozeIcon, SpamIcon, PrintIcon, TrashIcon, useShortcutTitle } from './MessageActions.jsx';
 import { PluginSlot } from '../plugins/PluginSlot.jsx';
 
@@ -49,6 +50,11 @@ const NOTHING_TO_TAKE_DRAFT = {
   archive: 'message.archived.otherAccountDraft',
   move: 'message.moved.otherAccountDraft',
 };
+
+function patchConversation(messages, flags) {
+  if (!messages.some(message => flags.has(message.id))) return messages;
+  return messages.map(message => flags.has(message.id) ? { ...message, ...flags.get(message.id) } : message);
+}
 
 // The whole conversation, stacked, with only what the reader has opened rendered.
 //
@@ -95,6 +101,21 @@ export default function ConversationPane({ threadId, folder, unified = false, ac
   const pickedRef = useRef(selectedMessageId);
   pickedRef.current = selectedMessageId;
   const prefetchedRef = useRef(null);
+  const pendingFlags = useRef(new Set());
+
+  const applyFlags = useCallback(flags => {
+    // A thread reply already in flight can still carry the old read flag.
+    for (const pending of pendingFlags.current) {
+      for (const [id, patch] of flags) pending.set(id, { ...pending.get(id), ...patch });
+    }
+    setMessages(prev => patchConversation(prev, flags));
+  }, []);
+
+  useLayoutEffect(() => {
+    const onFlags = event => applyFlags(event.detail);
+    window.addEventListener(MESSAGE_FLAGS_EVENT, onFlags);
+    return () => window.removeEventListener(MESSAGE_FLAGS_EVENT, onFlags);
+  }, [applyFlags]);
 
   useLayoutEffect(() => {
     if (!threadId) { setMessages([]); return; }
@@ -108,6 +129,9 @@ export default function ConversationPane({ threadId, folder, unified = false, ac
     // A new identity must never paint the previous conversation, even while its request is pending.
     setMessages(initial);
     const initialPicked = initial.find(message => message.id === pickedRef.current);
+    const flags = new Map();
+    const requests = pendingFlags.current;
+    requests.add(flags);
     setExpanded(accountId && initialPicked && initialPicked.account_id !== accountId
       ? new Set()
       : initialExpandedMessageIds(inAccount(initial, accountId)));
@@ -116,7 +140,7 @@ export default function ConversationPane({ threadId, folder, unified = false, ac
     (prefetched?.promise || api.getThread(threadId, folder, unified))
       .then(data => {
         if (cancelled) return;
-        const ordered = normalizeConversation(data?.messages || []);
+        const ordered = patchConversation(normalizeConversation(data?.messages || []), flags);
         setMessages(ordered);
         setLoadedConversation(`${accountId || ''}\n${threadId}`);
         setOpenedOnNewest(newestConversationMessage(inAccount(ordered, accountId))?.id ?? null);
@@ -134,8 +158,11 @@ export default function ConversationPane({ threadId, folder, unified = false, ac
           : initialExpandedMessageIds(inAccount(ordered, accountId)));
       })
       .catch(err => { if (!cancelled) setError(err.message); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+      .finally(() => {
+        requests.delete(flags);
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; requests.delete(flags); };
   }, [threadId, folder, unified, accountId]);
 
   // A reply that lands while the conversation is open shows up in its list row (the count and
@@ -154,16 +181,20 @@ export default function ConversationPane({ threadId, folder, unified = false, ac
     listedVersionRef.current = { threadId, version: listedVersion };
     if (!threadId || seen.threadId !== threadId || !listedVersion || !seen.version || seen.version === listedVersion) return;
     let cancelled = false;
+    const flags = new Map();
+    const requests = pendingFlags.current;
+    requests.add(flags);
     api.getThread(threadId, folder, unified)
       .then(data => {
         if (cancelled) return;
         setMessages(prev => {
           if (!prev.length) return prev;
-          return normalizeConversation(applyReadGuard(applyDeleteGuard(data?.messages || []), prev));
+          return patchConversation(normalizeConversation(applyReadGuard(applyDeleteGuard(data?.messages || []), prev)), flags);
         });
       })
-      .catch(() => {});
-    return () => { cancelled = true; };
+      .catch(() => {})
+      .finally(() => requests.delete(flags));
+    return () => { cancelled = true; requests.delete(flags); };
   }, [threadId, folder, unified, accountId, listedVersion]);
 
   // The pane stays mounted from one conversation to the next, so an open picker would
@@ -255,9 +286,9 @@ export default function ConversationPane({ threadId, folder, unified = false, ac
 
   // A flag change on one card: the pane's copy of the thread and the list's copy both change.
   const updateConversationMessage = useCallback((id, patch) => {
-    setMessages(prev => prev.map(message => (message.id === id ? { ...message, ...patch } : message)));
+    applyFlags(new Map([[id, patch]]));
     updateMessage(id, patch);
-  }, [updateMessage]);
+  }, [applyFlags, updateMessage]);
   useMessageMetadata(messages, updateConversationMessage);
 
   // The window opens on the click, before any await, or the browser blocks it. Bodies are loaded

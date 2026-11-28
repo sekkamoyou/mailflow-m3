@@ -1565,3 +1565,27 @@ test('GTD conversation header uses the displayed account on desktop and mobile',
     root = createRoot(document.getElementById('root'));
   }); }
 });
+
+test('remote read flags update an open conversation even while its original request is in flight', async () => {
+  const { MESSAGE_FLAGS_EVENT } = await import('../hooks/useWebSocket.js');
+  const getThread = api.getThread;
+  let finish;
+  api.getThread = () => new Promise(resolve => { finish = resolve; });
+  const trigger = async read => React.act(async () => window.dispatchEvent(new CustomEvent(MESSAGE_FLAGS_EVENT, {
+    detail: new Map([['m1', { is_read: read }]]),
+  })));
+  try {
+    await React.act(async () => root.render(React.createElement(ConversationPane, { threadId: 'live-flags', folder: 'INBOX' })));
+    await trigger(false);
+    await React.act(async () => finish({ messages: THREAD.map(message => ({ ...message, is_read: true })) }));
+    const header = document.querySelector('[data-message-id="m1"] > button');
+    assert.equal(header.firstElementChild.style.fontWeight, '600');
+    assert.equal(header.getAttribute('aria-expanded'), 'false');
+    await trigger(true);
+    assert.equal(header.firstElementChild.style.fontWeight, '400');
+    assert.equal(header.getAttribute('aria-expanded'), 'false');
+  } finally {
+    await React.act(async () => root.render(null));
+    api.getThread = getThread;
+  }
+});

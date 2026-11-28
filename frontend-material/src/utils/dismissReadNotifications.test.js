@@ -79,6 +79,26 @@ test('unrelated reads and unsupported or rejected registration do not affect mai
   await dismissReadNotifications(null, () => { throw new Error('must not query'); });
 });
 
+test('a read event closes its single notification and only fully read groups', async () => {
+  const one = notice('one'), group = notice(undefined), legacy = notice(undefined);
+  group.data.messageIds = ['one', 'two'];
+  registration([one, group, legacy]);
+  let twoRead = false;
+  const lookedUp = [];
+  const lookup = async id => {
+    lookedUp.push(id);
+    return { is_read: id === 'one' || twoRead };
+  };
+  await dismissReadNotifications(['one'], lookup, { confirmed: true });
+  assert.equal(one.closed, true);
+  assert.equal(group.closed, false);
+  assert.deepEqual(lookedUp, ['two']);
+  twoRead = true;
+  await dismissReadNotifications(['two'], lookup, { confirmed: true });
+  assert.equal(group.closed, true);
+  assert.equal(legacy.closed, false);
+});
+
 test('mark all read reconciles only server-confirmed read notifications', async () => {
   const one = notice('one'), other = notice('other'); registration([one, other]);
   globalThis.fetch = async (url) => ({ ok: true, json: async () => url.endsWith('/one') ? { is_read: true } : { is_read: false } });

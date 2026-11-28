@@ -2,7 +2,7 @@ import { bumpTagDefinitions, invalidateTags, refreshAllTags } from '../tags/tagS
 import { useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/index.js';
-import { api } from '../utils/api.js';
+import { api, readClient } from '../utils/api.js';
 import { installCapacitorNativeBridge } from '../utils/capacitorNativeBridge.js';
 import { playNotificationSound } from '../utils/notificationSounds.js';
 import { accountAffectsUnifiedInbox } from '../utils/unifiedInbox.js';
@@ -11,6 +11,8 @@ import { recordDiagEvent } from '../utils/diagEvents.js';
 import { scheduledFeed } from '../utils/scheduledFeed.js';
 import { SOCKET_CAUGHT_UP_EVENT } from '../utils/resumeRefresh.js';
 import { dismissReadNotifications } from '../utils/dismissReadNotifications.js';
+import { pendingMarkReadMap } from '../utils/pendingReads.js';
+import { PENDING_COUNT_MS } from '../utils/countSnapshots.js';
 
 function _applyServerCounts(counts) {
   useStore.getState().setUnreadCounts(counts);
@@ -46,6 +48,7 @@ const STABLE_MS = 10000;
 // connection that died while the device slept leaves the socket OPEN with no close to come.
 const PROBE_MS = 8000;
 export const PUSH_RECEIVED_EVENT = 'mailflow:push_received';
+export const MESSAGE_FLAGS_EVENT = 'mailflow:message_flags';
 
 export function useWebSocket() {
   const { t } = useTranslation();
@@ -53,6 +56,7 @@ export function useWebSocket() {
   const reconnectTimer = useRef(null);
   const mountedRef = useRef(true);
   const reconnectAttempt = useRef(0);
+  const lastBadgeFlags = useRef(new Map());
   // True once the socket has connected at least once. Distinguishes the initial
   // page-load connect (message list is freshly fetched anyway) from any later
   // reconnect — backoff OR a wake/visibility revive — which must run the catch-up
@@ -374,20 +378,40 @@ export function useWebSocket() {
       }
 
       case 'message_flags': {
-        // A read/star flag changed on ANOTHER of this user's devices. Apply it to the matching
-        // rows in place — no full folder refetch (that would flicker and refetch-storm while
-        // speeding through mail on another device). Sidebar counts follow via a debounced poll.
         const { changes } = data;
         if (Array.isArray(changes) && changes.length) {
-          void dismissReadNotifications(changes.filter(c => c?.is_read === true).map(c => c.id), api.getMessage);
-          const { updateMessage } = useStore.getState();
+          const state = useStore.getState();
+          if (state.isLocked) break;
+          const patches = new Map(), deltas = new Map();
+          const changedAt = Date.parse(data.changedAt);
           for (const c of changes) {
             if (!c || !c.id) continue;
+            const timedRead = typeof c.is_read === 'boolean' && Number.isFinite(changedAt);
+            const seen = lastBadgeFlags.current;
+            const previous = seen.get(c.id);
+            if (timedRead) {
+              if (previous && (previous.at > changedAt || (previous.at === changedAt && previous.read === c.is_read))) continue;
+              seen.set(c.id, { at: changedAt, read: c.is_read });
+              if (seen.size > 2048) seen.delete(seen.keys().next().value);
+            }
             const patch = {};
             if (typeof c.is_read === 'boolean') patch.is_read = c.is_read;
             if (typeof c.is_starred === 'boolean') patch.is_starred = c.is_starred;
-            if (Object.keys(patch).length) updateMessage(c.id, patch);
+            if (Object.keys(patch).length) patches.set(c.id, patch);
+            if (!timedRead || c.folder !== 'INBOX' || !c.accountId) continue;
+            // The originating tab already changed its badge. A newer IMAP observation
+            // supersedes a delayed event, even if the receiver never loaded this message.
+            if ((readClient && data.readClient === readClient && c.optimistic) ||
+                (c.is_read && pendingMarkReadMap.has(c.id)) ||
+                (previous?.read === c.is_read && changedAt - previous.at < PENDING_COUNT_MS) ||
+                Date.parse(state.serverUnreadCounts.snapshots?.[c.accountId]?.observedAt) >= changedAt) continue;
+            deltas.set(c.accountId, (deltas.get(c.accountId) || 0) + (c.is_read ? -1 : 1));
           }
+          for (const [id, patch] of patches) state.updateMessage(id, patch);
+          for (const [accountId, delta] of deltas) if (delta) state.adjustUnread(accountId, delta);
+          window.dispatchEvent(new CustomEvent(MESSAGE_FLAGS_EVENT, { detail: patches }));
+          const readIds = [...patches].filter(([, patch]) => patch.is_read === true).map(([id]) => id);
+          void dismissReadNotifications(readIds, api.getMessage, { confirmed: true });
           clearTimeout(flagCountRefreshTimer);
           flagCountRefreshTimer = setTimeout(() => {
             api.getUnreadCounts().then(_applyServerCounts).catch(() => {});

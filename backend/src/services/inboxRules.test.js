@@ -998,6 +998,8 @@ describe('newMailPushPayload', () => {
     const payload = newMailPushPayload([a, b], 2);
     expect(payload).toMatchObject({ title: 'bob@x', body: '2 new messages', url: `/?m=${b.id}`, avatarMessageId: b.id, pushMessageIds: [a.id, b.id] });
     expect(payload).not.toHaveProperty('messageId');
+    expect(payload.messageIds).toEqual([a.id, b.id]);
+    expect(newMailPushPayload([a, b], 3)).not.toHaveProperty('messageIds');
   });
 
   it('falls back to the inbox without an id', () => {

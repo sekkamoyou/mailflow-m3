@@ -61,6 +61,7 @@ self.addEventListener('push', (event) => {
     avatar,
     url         = '/',
     messageId,            // only for a push about one message: enables the action buttons
+    messageIds,           // complete membership of a grouped notification, when provided
     unreadCount,          // intentionally no default — undefined means "don't touch badge"
   } = data;
 
@@ -93,7 +94,7 @@ self.addEventListener('push', (event) => {
             body,
             ...(resolvedIcon ? { icon: resolvedIcon } : {}),
             badge: appImage(badge, '/badge-96.png'),
-            data:  { url, messageId },
+            data:  { url, messageId, messageIds },
             ...(messageId ? { actions: MESSAGE_ACTIONS } : {}),
             // Replace any existing MailFlow notification so rapid arrivals
             // don't stack unboundedly in the notification center.
