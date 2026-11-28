@@ -229,7 +229,6 @@ html[lang=ko] :is(.md-button, .nav-item, .admin-tab) { word-break: keep-all; }
   .material-app-header { grid-template-columns: 80px minmax(0, 1fr); }
   .material-brand-name { display: none; }
   .material-folder-rail .material-drawer-header { display: flex !important; }
-  .material-folder-rail .material-drawer-header { padding-top: 16px !important; }
 }
 @media (max-width: 839px) {
   .material-list-toolbar { padding-inline: 8px; gap: 4px; }
